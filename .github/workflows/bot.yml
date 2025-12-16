@@ -1,14 +1,12 @@
 name: Discord Bot
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"   # 5分ごとに再起動保険
-  workflow_dispatch:
+  push:
+    branches: [ "main" ]
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 350   # 約5.8時間
     steps:
       - uses: actions/checkout@v4
 
@@ -18,9 +16,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install discord.py aiohttp
 
       - name: Run bot
-        run: |
-          python main.py
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: python main.py
