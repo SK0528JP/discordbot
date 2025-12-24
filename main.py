@@ -42,22 +42,26 @@ class SovietBot(commands.Bot):
         self.user_data = {}
 
     async def setup_hook(self):
-        self.load_data()
+        self.load_data() # 起動時にロード
         try:
             await self.tree.sync()
-            print("--- 国家指令システム・経済改革版 同期完了 ---")
+            print("--- 経済改革版システム 同期完了 ---")
         except Exception as e:
             print(f"同期失敗: {e}")
 
     def load_data(self):
+        """常に最新のファイルを読み込み、メモリを更新する"""
         if os.path.exists(DATA_FILE):
             try:
                 with open(DATA_FILE, "r", encoding="utf-8") as f:
                     self.user_data = json.load(f)
-            except: self.user_data = {}
-        else: self.user_data = {}
+            except: 
+                self.user_data = {}
+        else: 
+            self.user_data = {}
 
     def save_data(self):
+        """現在のメモリ状態をファイルへ書き出す"""
         try:
             with open(DATA_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.user_data, f, ensure_ascii=False, indent=4)
@@ -65,21 +69,31 @@ class SovietBot(commands.Bot):
             print(f"セーブエラー: {e}")
 
     def get_user(self, user_id: str):
-        """ユーザーデータの初期化と取得"""
-        if user_id not in self.user_data:
-            self.user_data[user_id] = {"xp": 0, "money": 0, "last_msg": 0}
-        # 旧バージョンデータからの互換性維持
-        if "money" not in self.user_data[user_id]:
-            self.user_data[user_id]["money"] = 0
-        return self.user_data[user_id]
+        """ユーザーデータの初期化と取得（キーを確実に文字列にする）"""
+        uid = str(user_id)
+        if uid not in self.user_data:
+            self.user_data[uid] = {"xp": 0, "money": 0, "last_msg": 0}
+        
+        # データの完全性チェック
+        u = self.user_data[uid]
+        if "xp" not in u: u["xp"] = 0
+        if "money" not in u: u["money"] = 0
+        if "last_msg" not in u: u["last_msg"] = 0
+        return u
 
     async def add_xp(self, user_id: str):
         now = datetime.now().timestamp()
-        u = self.get_user(user_id)
+        uid = str(user_id)
+        # 1. ロードして最新状態にする
+        self.load_data()
+        
+        u = self.get_user(uid)
         if now - u.get("last_msg", 0) < 5:
             return
+
         u["xp"] += random.randint(10, 20)
         u["last_msg"] = now
+        # 2. 保存する
         self.save_data()
 
 bot = SovietBot()
@@ -89,13 +103,16 @@ bot = SovietBot()
 @bot.tree.command(name="exchange", description="保有XPを資金($)に換金する")
 @app_commands.describe(amount="換金するXP量")
 async def exchange(interaction: discord.Interaction, amount: int):
-    u = bot.get_user(str(interaction.user.id))
+    # 最新データを反映
+    bot.load_data()
+    uid = str(interaction.user.id)
+    u = bot.get_user(uid)
+
     if amount <= 0:
-        await interaction.response.send_message("❌ 不正な数値だ。", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 不正な数値だ。", ephemeral=True)
+    
     if u["xp"] < amount:
-        await interaction.response.send_message(f"❌ 貢献度(XP)が不足している。現在のXP: {u['xp']}", ephemeral=True)
-        return
+        return await interaction.response.send_message(f"❌ 貢献度(XP)が不足している。現在のXP: {u['xp']}", ephemeral=True)
 
     u["xp"] -= amount
     u["money"] += amount
@@ -109,20 +126,18 @@ async def exchange(interaction: discord.Interaction, amount: int):
 @app_commands.describe(receiver="送金相手", amount="送金額($)")
 async def pay(interaction: discord.Interaction, receiver: discord.Member, amount: int):
     if receiver.bot:
-        await interaction.response.send_message("❌ 機械に資金を与えても意味はない。", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 機械に資金を与えても意味はない。", ephemeral=True)
     if amount <= 0:
-        await interaction.response.send_message("❌ 不正な送金額だ。", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ 不正な送金額だ。", ephemeral=True)
 
-    sender_id = str(interaction.user.id)
-    rcvr_id = str(receiver.id)
-    s = bot.get_user(sender_id)
-    r = bot.get_user(rcvr_id)
+    bot.load_data()
+    s_id = str(interaction.user.id)
+    r_id = str(receiver.id)
+    s = bot.get_user(s_id)
+    r = bot.get_user(r_id)
 
     if s["money"] < amount:
-        await interaction.response.send_message(f"❌ 資金が不足している。保有: ${s['money']}", ephemeral=True)
-        return
+        return await interaction.response.send_message(f"❌ 資金が不足している。保有: ${s['money']}", ephemeral=True)
 
     s["money"] -= amount
     r["money"] += amount
@@ -134,10 +149,11 @@ async def pay(interaction: discord.Interaction, receiver: discord.Member, amount
 
 @bot.tree.command(name="money_ranking", description="保有資金のランキングを表示する")
 async def money_ranking(interaction: discord.Interaction):
+    bot.load_data()
     # 金額順、同値ならID順でソートを固定
     sorted_users = sorted(
         bot.user_data.items(), 
-        key=lambda x: (x[1].get("money", 0), x[0]), 
+        key=lambda x: (int(x[1].get("money", 0)), x[0]), 
         reverse=True
     )[:10]
 
@@ -152,14 +168,13 @@ async def money_ranking(interaction: discord.Interaction):
     embed.set_footer(text=f"あなたの保有金額: ${u['money']}")
     await interaction.response.send_message(embed=embed)
 
-# ===== 既存コマンドの改善版 =====
-
 @bot.tree.command(name="ranking", description="国家への貢献度(XP)ランキングを表示する")
 async def ranking(interaction: discord.Interaction):
-    # XP順、同値ならID順でソートを固定（結果がブレるのを防ぐ）
+    bot.load_data()
+    # XP順、同値ならID順でソートを固定
     sorted_users = sorted(
         bot.user_data.items(), 
-        key=lambda x: (x[1].get("xp", 0), x[0]), 
+        key=lambda x: (int(x[1].get("xp", 0)), x[0]), 
         reverse=True
     )[:10]
 
@@ -174,40 +189,7 @@ async def ranking(interaction: discord.Interaction):
     embed.set_footer(text=f"あなたの現在の貢献度: {u['xp']} pt")
     await interaction.response.send_message(embed=embed)
 
-# --- 以下、前回の /roulette, /comment, /meigen, /omikuji, /janken, /ping と on_message を継承 ---
-
-@bot.event
-async def on_ready():
-    await bot.change_presence(status=discord.Status.idle, activity=discord.Activity(type=discord.ActivityType.playing, name="🎵 労働中"))
-    print(f"同志 {bot.user} 経済改革を断行中。")
-
-@bot.event
-async def on_message(message):
-    if message.author.bot: return
-    await bot.add_xp(str(message.author.id))
-    await bot.process_commands(message)
-
-# (以下、じゃんけんView等のコードは前回同様)
-class JankenView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=60)
-    async def handle_play(self, it, user_hand):
-        bh = random.choice(["グー", "チョキ", "パー"])
-        he = {"グー": "✊", "チョキ": "✌️", "パー": "✋"}
-        if user_hand == bh: res, col = "引き分け", 0x808080
-        elif ((user_hand == "グー" and bh == "チョキ") or (user_hand == "チョキ" and bh == "パー") or (user_hand == "パー" and bh == "グー")): res, col = "勝利", 0x00FF00
-        else: res, col = "敗北", 0x000000
-        e = discord.Embed(title="☭ 戦略的決着報告書", color=col)
-        e.add_field(name="同志/国家", value=f"{he[user_hand]} vs {he[bh]}")
-        e.add_field(name="判定", value=f"**{res}**", inline=False)
-        for c in self.children: c.disabled = True
-        await it.response.edit_message(view=self)
-        await it.followup.send(embed=e)
-    @discord.ui.button(label="強行突破", style=discord.ButtonStyle.danger, emoji="✊")
-    async def rock(self, it, btn): await self.handle_play(it, "グー")
-    @discord.ui.button(label="分断工作", style=discord.ButtonStyle.danger, emoji="✌️")
-    async def sciss(self, it, btn): await self.handle_play(it, "チョキ")
-    @discord.ui.button(label="包囲作戦", style=discord.ButtonStyle.danger, emoji="✋")
-    async def paper(self, it, btn): await self.handle_play(it, "パー")
+# ===== 既存機能の再統合 =====
 
 @bot.tree.command(name="roulette")
 async def roulette(it, options: str):
@@ -248,8 +230,28 @@ async def omikuji(it):
 async def meigen(it):
     q = random.choice(QUOTES_ARCHIVE)
     e = discord.Embed(title="📜 歴史的アーカイブ", description=f"```\n{q['text']}\n```", color=THEME_COLOR)
-    e.set_footer(text=f"{q['author']} ({q['faction']})")
+    e.set_footer(text=f"{q['author']}")
     await it.response.send_message(embed=e)
+
+class JankenView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=60)
+    async def handle_play(self, it, user_hand):
+        bh = random.choice(["グー", "チョキ", "パー"])
+        he = {"グー": "✊", "チョキ": "✌️", "パー": "✋"}
+        if user_hand == bh: res, col = "引き分け", 0x808080
+        elif ((user_hand == "グー" and bh == "チョキ") or (user_hand == "チョキ" and bh == "パー") or (user_hand == "パー" and bh == "グー")): res, col = "勝利", 0x00FF00
+        else: res, col = "敗北", 0x000000
+        e = discord.Embed(title="☭ 戦略的決着報告書", color=col)
+        e.add_field(name="判定", value=f"同志 {he[user_hand]} vs 国家 {he[bh]}\n**{res}**")
+        for c in self.children: c.disabled = True
+        await it.response.edit_message(view=self)
+        await it.followup.send(embed=e)
+    @discord.ui.button(label="✊", style=discord.ButtonStyle.danger)
+    async def rock(self, it, btn): await self.handle_play(it, "グー")
+    @discord.ui.button(label="✌️", style=discord.ButtonStyle.danger)
+    async def sciss(self, it, btn): await self.handle_play(it, "チョキ")
+    @discord.ui.button(label="✋", style=discord.ButtonStyle.danger)
+    async def paper(self, it, btn): await self.handle_play(it, "パー")
 
 @bot.tree.command(name="janken")
 async def janken(it):
@@ -258,5 +260,16 @@ async def janken(it):
 @bot.tree.command(name="ping")
 async def ping(it):
     await it.response.send_message(f"pong! {round(bot.latency*1000)}ms", ephemeral=True)
+
+@bot.event
+async def on_ready():
+    await bot.change_presence(status=discord.Status.idle, activity=discord.Activity(type=discord.ActivityType.playing, name="🎵 労働中"))
+    print(f"同志 {bot.user} 稼働。")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot: return
+    await bot.add_xp(str(message.author.id))
+    await bot.process_commands(message)
 
 bot.run(TOKEN)
