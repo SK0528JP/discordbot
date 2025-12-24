@@ -2,7 +2,7 @@ import os
 import asyncio
 import random
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
@@ -13,6 +13,9 @@ from discord import app_commands
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 DATA_FILE = "soviet_ledger.json"
 THEME_COLOR = 0xCC0000
+
+# 日本標準時 (JST) の定義
+JST = timezone(timedelta(hours=9))
 
 # ===== 歴史的アーカイブ（名言） =====
 QUOTES_ARCHIVE = [
@@ -62,7 +65,7 @@ class SovietLedger:
 
     async def add_xp(self, user_id: str):
         uid = str(user_id)
-        now = datetime.now().timestamp()
+        now = datetime.now(timezone.utc).timestamp() # 内部はUTCで保持
         async with self.lock:
             u = self.get_user(uid)
             if now - u["last"] < 3: return
@@ -134,28 +137,38 @@ bot = SovietBot()
 
 # ===== 指令コマンド群 =====
 
-@bot.tree.command(name="ping", description="通信インフラの遅延を計測する")
-async def ping(it: discord.Interaction):
-    # 通信の健全性を同志に報告
-    latency = round(bot.latency * 1000)
-    await it.response.send_message(f"📡 通信インフラ稼働中：**{latency}ms**", ephemeral=True)
-
 @bot.tree.command(name="user", description="指定した同志の全記録を照会する")
 async def user_info(it: discord.Interaction, target: Optional[discord.Member] = None):
     target = target or it.user
     u = ledger.get_user(target.id)
     xp_rank = ledger.get_rank(target.id, "xp")
     money_rank = ledger.get_rank(target.id, "money")
-    last_act = datetime.fromtimestamp(u["last"]).strftime('%Y/%m/%d %H:%M:%S') if u["last"] > 0 else "記録なし"
-    join_date = target.joined_at.strftime('%Y/%m/%d') if target.joined_at else "不明"
+    
+    # タイムスタンプをJSTに変換
+    if u["last"] > 0:
+        last_act_dt = datetime.fromtimestamp(u["last"], tz=timezone.utc).astimezone(JST)
+        last_act = last_act_dt.strftime('%Y/%m/%d %H:%M:%S')
+    else:
+        last_act = "記録なし"
+
+    # 入隊日をJSTに変換
+    if target.joined_at:
+        join_date = target.joined_at.astimezone(JST).strftime('%Y/%m/%d')
+    else:
+        join_date = "不明"
 
     embed = discord.Embed(title=f"☭ 国家アーカイブ：{target.display_name}", color=THEME_COLOR)
     embed.set_thumbnail(url=target.display_avatar.url)
     embed.add_field(name="🎖️ 貢献度 (XP)", value=f"**{u['xp']}** pt (第 {xp_rank} 位)", inline=True)
     embed.add_field(name="💰 保有資金 ($)", value=f"**${u['money']}** (第 {money_rank} 位)", inline=True)
     embed.add_field(name="📅 サーバー入隊日", value=join_date, inline=True)
-    embed.add_field(name="🕒 最終労働時刻", value=last_act, inline=False)
+    embed.add_field(name="🕒 最終労働時刻 (JST)", value=f"`{last_act}`", inline=False)
     await it.response.send_message(embed=embed)
+
+@bot.tree.command(name="ping", description="通信インフラの遅延を計測する")
+async def ping(it: discord.Interaction):
+    latency = round(bot.latency * 1000)
+    await it.response.send_message(f"📡 通信インフラ稼働中：**{latency}ms**", ephemeral=True)
 
 @bot.tree.command(name="status", description="自身の労働手帳を確認する")
 async def status(it: discord.Interaction):
@@ -231,6 +244,6 @@ async def on_message(message):
 @bot.event
 async def on_ready():
     await bot.change_presence(status=discord.Status.idle, activity=discord.Activity(type=discord.ActivityType.playing, name="🎵 労働中"))
-    print(f"同志 {bot.user}、全インフラ復元完了。")
+    print(f"同志 {bot.user}、時刻のJST同期を完了。")
 
 bot.run(TOKEN)
