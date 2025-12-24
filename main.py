@@ -55,11 +55,9 @@ class SovietLedger:
         return u
 
     def get_rank(self, user_id: str, key: str):
-        """特定のキーにおけるユーザーの現在の順位を取得"""
         sorted_list = sorted(self.data.items(), key=lambda x: (int(x[1].get(key, 0)), x[0]), reverse=True)
         for i, (uid, _) in enumerate(sorted_list):
-            if uid == str(user_id):
-                return i + 1
+            if uid == str(user_id): return i + 1
         return "圏外"
 
     async def add_xp(self, user_id: str):
@@ -136,27 +134,27 @@ bot = SovietBot()
 
 # ===== 指令コマンド群 =====
 
+@bot.tree.command(name="ping", description="通信インフラの遅延を計測する")
+async def ping(it: discord.Interaction):
+    # 通信の健全性を同志に報告
+    latency = round(bot.latency * 1000)
+    await it.response.send_message(f"📡 通信インフラ稼働中：**{latency}ms**", ephemeral=True)
+
 @bot.tree.command(name="user", description="指定した同志の全記録を照会する")
-@app_commands.describe(target="照会する同志")
 async def user_info(it: discord.Interaction, target: Optional[discord.Member] = None):
     target = target or it.user
     u = ledger.get_user(target.id)
     xp_rank = ledger.get_rank(target.id, "xp")
     money_rank = ledger.get_rank(target.id, "money")
-    
-    # 最終活動時刻のフォーマット
     last_act = datetime.fromtimestamp(u["last"]).strftime('%Y/%m/%d %H:%M:%S') if u["last"] > 0 else "記録なし"
     join_date = target.joined_at.strftime('%Y/%m/%d') if target.joined_at else "不明"
 
-    embed = discord.Embed(title=f"☭ 国家アーカイブ：{target.display_name} 照会結果", color=THEME_COLOR)
+    embed = discord.Embed(title=f"☭ 国家アーカイブ：{target.display_name}", color=THEME_COLOR)
     embed.set_thumbnail(url=target.display_avatar.url)
-    
     embed.add_field(name="🎖️ 貢献度 (XP)", value=f"**{u['xp']}** pt (第 {xp_rank} 位)", inline=True)
     embed.add_field(name="💰 保有資金 ($)", value=f"**${u['money']}** (第 {money_rank} 位)", inline=True)
     embed.add_field(name="📅 サーバー入隊日", value=join_date, inline=True)
     embed.add_field(name="🕒 最終労働時刻", value=last_act, inline=False)
-    
-    embed.set_footer(text=f"照会ID: {target.id}")
     await it.response.send_message(embed=embed)
 
 @bot.tree.command(name="status", description="自身の労働手帳を確認する")
@@ -182,36 +180,20 @@ async def money_ranking(it: discord.Interaction):
 
 @bot.tree.command(name="exchange", description="XPを資金に換金")
 async def exchange(it: discord.Interaction, amount: int):
-    if amount <= 0: return await it.response.send_message("❌ 不正な数値だ。", ephemeral=True)
     success, val = await ledger.exchange(it.user.id, amount)
     if success: await it.response.send_message(f"✅ 換金成功。現在の所持金: **${val}**")
-    else: await it.response.send_message(f"❌ XP不足（現在: {val} XP）", ephemeral=True)
+    else: await it.response.send_message(f"❌ XP不足", ephemeral=True)
 
 @bot.tree.command(name="pay", description="資金を送金")
 async def pay(it: discord.Interaction, receiver: discord.Member, amount: int):
     success, res = await ledger.transfer(it.user.id, receiver.id, amount)
-    if success: await it.response.send_message(f"💰 {it.user.mention} ➔ {receiver.mention} へ **${amount}** 送金完了。")
+    if success: await it.response.send_message(f"💰 {it.user.mention} ➔ {receiver.mention} へ **${amount}** 送金。")
     else: await it.response.send_message(f"❌ {res}", ephemeral=True)
-
-@bot.tree.command(name="roulette")
-async def roulette(it: discord.Interaction, options: str):
-    cl = options.replace("　", " ").split()
-    if len(cl) < 2: return await it.response.send_message("❌ 2つ以上必要だ。", ephemeral=True)
-    await it.response.send_message(embed=discord.Embed(title="☭ 国家意思決定", description=f"🏆 **{random.choice(cl)}**", color=THEME_COLOR))
 
 @bot.tree.command(name="omikuji")
 async def omikuji(it: discord.Interaction):
-    f = random.choice([
-        {"r": "労働英雄(大吉)", "i": "特級ウォッカ", "c": 0xFFD700},
-        {"r": "模範的市民(中吉)", "i": "追加のジャガイモ", "c": 0xCC0000},
-        {"r": "一般的労働者(小吉)", "i": "スープ", "c": 0xCC0000},
-        {"r": "要注意人物(末吉)", "i": "パン", "c": 0x8B4513},
-        {"r": "シベリア(凶)", "i": "片道切符", "c": 0x0000FF}
-    ])
-    e = discord.Embed(title="☭ 配給物資通達書", color=f["c"])
-    e.add_field(name="判定", value=f["r"], inline=True)
-    e.add_field(name="支給品", value=f["i"], inline=True)
-    await it.response.send_message(embed=e)
+    f = random.choice([{"r": "大吉", "i": "ウォッカ"}, {"r": "中吉", "i": "ジャガイモ"}, {"r": "小吉", "i": "スープ"}, {"r": "末吉", "i": "パン"}, {"r": "凶", "i": "シベリア"}])
+    await it.response.send_message(embed=discord.Embed(title="☭ 配給物資", description=f"判定: {f['r']}\n支給: {f['i']}", color=THEME_COLOR))
 
 @bot.tree.command(name="janken")
 async def janken(it: discord.Interaction):
@@ -222,17 +204,22 @@ async def meigen(it: discord.Interaction):
     q = random.choice(QUOTES_ARCHIVE)
     await it.response.send_message(embed=discord.Embed(title="📜 引用", description=f"```\n{q['text']}\n```", color=THEME_COLOR).set_footer(text=q['author']))
 
+@bot.tree.command(name="roulette")
+async def roulette(it: discord.Interaction, options: str):
+    cl = options.replace("　", " ").split()
+    await it.response.send_message(f"🏆 決定：**{random.choice(cl)}**")
+
 @bot.tree.command(name="comment")
 async def comment(it: discord.Interaction, content: str, image: Optional[discord.Attachment] = None, use_embed: bool = False):
     msg = content.replace("\\n", "\n")
     if use_embed:
-        e = discord.Embed(description=msg, color=THEME_COLOR).set_author(name="☭ 公式声明", icon_url=bot.user.display_avatar.url)
+        e = discord.Embed(description=msg, color=THEME_COLOR).set_author(name="☭ 公式声明")
         if image: e.set_image(url=image.url)
         await it.channel.send(embed=e)
     else:
         f = await image.to_file() if image else None
         await it.channel.send(content=msg, file=f)
-    await it.response.send_message("完了。", ephemeral=True)
+    await it.response.send_message("完了", ephemeral=True)
 
 # ===== イベント =====
 @bot.event
@@ -244,6 +231,6 @@ async def on_message(message):
 @bot.event
 async def on_ready():
     await bot.change_presence(status=discord.Status.idle, activity=discord.Activity(type=discord.ActivityType.playing, name="🎵 労働中"))
-    print(f"同志 {bot.user}、全機能復元・拡張完了。")
+    print(f"同志 {bot.user}、全インフラ復元完了。")
 
 bot.run(TOKEN)
