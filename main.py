@@ -2,6 +2,7 @@ import os
 import asyncio
 import random
 import json
+import requests
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -11,21 +12,12 @@ from discord import app_commands
 
 # ===== 基本設定 =====
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-DATA_FILE = "soviet_ledger.json"
+GITHUB_TOKEN = os.getenv("MY_GITHUB_TOKEN")
+GIST_ID = os.getenv("GIST_ID")
 THEME_COLOR = 0xCC0000
-
-# 日本標準時 (JST) の定義
 JST = timezone(timedelta(hours=9))
 
-# ===== 歴史的アーカイブ（名言） =====
-QUOTES_ARCHIVE = [
-    {"text": "学習し、学習し、そして学習することだ。", "author": "ウラジーミル・レーニン"},
-    {"text": "一人の死は悲劇だが、数百万人の死は統計上の数字に過ぎない。", "author": "ヨシフ・スターリン"},
-    {"text": "地球は青かった。", "author": "ユーリ・ガガーリン"},
-    {"text": "信頼せよ、だが検証せよ。", "author": "ロシアのことわざ"}
-]
-
-# ===== 国家元帳（データ一元管理クラス） =====
+# ===== 国家元帳（Gist API 永続化ストレージ） =====
 class SovietLedger:
     def __init__(self):
         self.data = {}
@@ -33,19 +25,32 @@ class SovietLedger:
         self._load()
 
     def _load(self):
-        if os.path.exists(DATA_FILE):
-            try:
-                with open(DATA_FILE, "r", encoding="utf-8") as f:
-                    self.data = json.load(f)
-            except: self.data = {}
-        else: self.data = {}
+        if not GITHUB_TOKEN or not GIST_ID:
+            print("⚠️ 警告: 環境変数が未設定です。一時モードで動作します。")
+            return
+        try:
+            headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+            res = requests.get(f"https://api.github.com/gists/{GIST_ID}", headers=headers)
+            if res.status_code == 200:
+                files = res.json().get("files", {})
+                content = files.get("soviet_ledger.json", {}).get("content", "{}")
+                self.data = json.loads(content)
+                print("✅ 国家元帳を Gist からロードしました。")
+            else:
+                print(f"❌ ロード失敗: {res.status_code}")
+        except Exception as e:
+            print(f"❌ ロードエラー: {e}")
 
     def _save(self):
+        if not GITHUB_TOKEN or not GIST_ID: return
         try:
-            with open(DATA_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=4)
+            headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+            payload = {"files": {"soviet_ledger.json": {"content": json.dumps(self.data, ensure_ascii=False, indent=4)}}}
+            res = requests.patch(f"https://api.github.com/gists/{GIST_ID}", headers=headers, json=payload)
+            if res.status_code == 200:
+                print("💾 国家元帳を Gist へ同期しました。")
         except Exception as e:
-            print(f"元帳保存失敗: {e}")
+            print(f"❌ 同期エラー: {e}")
 
     def get_user(self, user_id: str):
         uid = str(user_id)
@@ -65,7 +70,7 @@ class SovietLedger:
 
     async def add_xp(self, user_id: str):
         uid = str(user_id)
-        now = datetime.now(timezone.utc).timestamp() # 内部はUTCで保持
+        now = datetime.now(timezone.utc).timestamp()
         async with self.lock:
             u = self.get_user(uid)
             if now - u["last"] < 3: return
@@ -97,132 +102,83 @@ class SovietLedger:
 
 ledger = SovietLedger()
 
-# ===== UIコンポーネント: じゃんけん View =====
-class JankenView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    async def handle_play(self, interaction: discord.Interaction, user_hand: str):
-        bot_hand = random.choice(["✊", "✌️", "✋"])
-        if user_hand == bot_hand: res, col = "引き分け", 0x808080
-        elif (user_hand=="✊" and bot_hand=="✌️") or (user_hand=="✌️" and bot_hand=="✋") or (user_hand=="✋" and bot_hand=="✊"):
-            res, col = "勝利", 0x00FF00
-        else: res, col = "敗北", 0x000000
-        embed = discord.Embed(title="☭ 戦略的決着報告書", color=col)
-        embed.description = f"同志 {user_hand} vs 国家 {bot_hand}\n判定: **{res}**"
-        for child in self.children: child.disabled = True
-        await interaction.response.edit_message(view=self)
-        await interaction.followup.send(embed=embed)
-
-    @discord.ui.button(label="✊", style=discord.ButtonStyle.danger)
-    async def rock(self, it, b): await self.handle_play(it, "✊")
-    @discord.ui.button(label="✌️", style=discord.ButtonStyle.danger)
-    async def sciss(self, it, b): await self.handle_play(it, "✌️")
-    @discord.ui.button(label="✋", style=discord.ButtonStyle.danger)
-    async def paper(self, it, b): await self.handle_play(it, "✋")
-
-# ===== Botクラス定義 =====
+# ===== ボット定義 =====
 class SovietBot(commands.Bot):
     def __init__(self):
-        super().__init__(
-            command_prefix="!",
-            intents=discord.Intents.all(),
-            status=discord.Status.idle,
-            activity=discord.Activity(type=discord.ActivityType.playing, name="🎵 労働中")
-        )
+        super().__init__(command_prefix="!", intents=discord.Intents.all(), status=discord.Status.idle,
+                         activity=discord.Activity(type=discord.ActivityType.playing, name="🎵 労働中"))
     async def setup_hook(self):
         await self.tree.sync()
 
 bot = SovietBot()
 
 # ===== 指令コマンド群 =====
-
-@bot.tree.command(name="user", description="指定した同志の全記録を照会する")
+@bot.tree.command(name="user", description="同志の全記録を照会")
 async def user_info(it: discord.Interaction, target: Optional[discord.Member] = None):
-    target = target or it.user
-    u = ledger.get_user(target.id)
-    xp_rank = ledger.get_rank(target.id, "xp")
-    money_rank = ledger.get_rank(target.id, "money")
-    
-    # タイムスタンプをJSTに変換
-    if u["last"] > 0:
-        last_act_dt = datetime.fromtimestamp(u["last"], tz=timezone.utc).astimezone(JST)
-        last_act = last_act_dt.strftime('%Y/%m/%d %H:%M:%S')
-    else:
-        last_act = "記録なし"
+    t = target or it.user
+    u = ledger.get_user(t.id)
+    xp_rank, m_rank = ledger.get_rank(t.id, "xp"), ledger.get_rank(t.id, "money")
+    last_act = datetime.fromtimestamp(u["last"], tz=timezone.utc).astimezone(JST).strftime('%Y/%m/%d %H:%M:%S') if u["last"] > 0 else "記録なし"
+    join_date = t.joined_at.astimezone(JST).strftime('%Y/%m/%d') if t.joined_at else "不明"
+    e = discord.Embed(title=f"☭ 国家アーカイブ：{t.display_name}", color=THEME_COLOR)
+    e.set_thumbnail(url=t.display_avatar.url)
+    e.add_field(name="🎖️ XP", value=f"**{u['xp']}** (第{xp_rank}位)", inline=True)
+    e.add_field(name="💰 資金", value=f"**${u['money']}** (第{m_rank}位)", inline=True)
+    e.add_field(name="📅 入隊日", value=join_date, inline=True)
+    e.add_field(name="🕒 最終労働(JST)", value=f"`{last_act}`", inline=False)
+    await it.response.send_message(embed=e)
 
-    # 入隊日をJSTに変換
-    if target.joined_at:
-        join_date = target.joined_at.astimezone(JST).strftime('%Y/%m/%d')
-    else:
-        join_date = "不明"
-
-    embed = discord.Embed(title=f"☭ 国家アーカイブ：{target.display_name}", color=THEME_COLOR)
-    embed.set_thumbnail(url=target.display_avatar.url)
-    embed.add_field(name="🎖️ 貢献度 (XP)", value=f"**{u['xp']}** pt (第 {xp_rank} 位)", inline=True)
-    embed.add_field(name="💰 保有資金 ($)", value=f"**${u['money']}** (第 {money_rank} 位)", inline=True)
-    embed.add_field(name="📅 サーバー入隊日", value=join_date, inline=True)
-    embed.add_field(name="🕒 最終労働時刻 (JST)", value=f"`{last_act}`", inline=False)
-    await it.response.send_message(embed=embed)
-
-@bot.tree.command(name="ping", description="通信インフラの遅延を計測する")
-async def ping(it: discord.Interaction):
-    latency = round(bot.latency * 1000)
-    await it.response.send_message(f"📡 通信インフラ稼働中：**{latency}ms**", ephemeral=True)
-
-@bot.tree.command(name="status", description="自身の労働手帳を確認する")
+@bot.tree.command(name="status", description="自身の労働手帳")
 async def status(it: discord.Interaction):
     u = ledger.get_user(it.user.id)
-    embed = discord.Embed(title=f"☭ {it.user.display_name} の労働手帳", color=THEME_COLOR)
-    embed.add_field(name="貢献度(XP)", value=f"{u['xp']} pt", inline=True)
-    embed.add_field(name="保有資金($)", value=f"${u['money']}", inline=True)
-    embed.set_thumbnail(url=it.user.display_avatar.url)
-    await it.response.send_message(embed=embed)
+    e = discord.Embed(title=f"☭ {it.user.display_name} の労働手帳", color=THEME_COLOR)
+    e.add_field(name="XP", value=f"{u['xp']} pt", inline=True)
+    e.add_field(name="資金", value=f"${u['money']}", inline=True)
+    e.set_thumbnail(url=it.user.display_avatar.url)
+    await it.response.send_message(embed=e)
 
-@bot.tree.command(name="ranking", description="貢献度ランキングを表示")
+@bot.tree.command(name="ranking", description="XP順位")
 async def ranking(it: discord.Interaction):
     top = sorted(ledger.data.items(), key=lambda x: (int(x[1].get('xp',0)), x[0]), reverse=True)[:10]
     desc = "\n".join([f"🥇 <@{uid}>: **{d['xp']}** pt" for uid, d in top])
-    await it.response.send_message(embed=discord.Embed(title="☭ 労働英雄ランキング", description=desc or "記録なし", color=THEME_COLOR))
+    await it.response.send_message(embed=discord.Embed(title="☭ 労働英雄", description=desc or "無", color=THEME_COLOR))
 
-@bot.tree.command(name="money_ranking", description="保有資金ランキングを表示")
+@bot.tree.command(name="money_ranking", description="資金順位")
 async def money_ranking(it: discord.Interaction):
     top = sorted(ledger.data.items(), key=lambda x: (int(x[1].get('money',0)), x[0]), reverse=True)[:10]
     desc = "\n".join([f"💰 <@{uid}>: **${d['money']}**" for uid, d in top])
-    await it.response.send_message(embed=discord.Embed(title="☭ 国家富裕層ランキング", description=desc or "記録なし", color=0xFFD700))
+    await it.response.send_message(embed=discord.Embed(title="☭ 国家富裕層", description=desc or "無", color=0xFFD700))
 
-@bot.tree.command(name="exchange", description="XPを資金に換金")
+@bot.tree.command(name="exchange", description="換金")
 async def exchange(it: discord.Interaction, amount: int):
     success, val = await ledger.exchange(it.user.id, amount)
-    if success: await it.response.send_message(f"✅ 換金成功。現在の所持金: **${val}**")
-    else: await it.response.send_message(f"❌ XP不足", ephemeral=True)
+    await it.response.send_message(f"✅ 成功。所持金: ${val}" if success else "❌ XP不足", ephemeral=not success)
 
-@bot.tree.command(name="pay", description="資金を送金")
+@bot.tree.command(name="pay", description="送金")
 async def pay(it: discord.Interaction, receiver: discord.Member, amount: int):
-    success, res = await ledger.transfer(it.user.id, receiver.id, amount)
-    if success: await it.response.send_message(f"💰 {it.user.mention} ➔ {receiver.mention} へ **${amount}** 送金。")
-    else: await it.response.send_message(f"❌ {res}", ephemeral=True)
+    s, r = await ledger.transfer(it.user.id, receiver.id, amount)
+    await it.response.send_message(f"💰 {receiver.mention}へ ${amount} 送金。" if s else f"❌ {r}", ephemeral=not s)
 
-@bot.tree.command(name="omikuji")
+@bot.tree.command(name="ping", description="遅延計測")
+async def ping(it: discord.Interaction):
+    await it.response.send_message(f"📡 応答: {round(bot.latency * 1000)}ms", ephemeral=True)
+
+@bot.tree.command(name="omikuji", description="配給")
 async def omikuji(it: discord.Interaction):
-    f = random.choice([{"r": "大吉", "i": "ウォッカ"}, {"r": "中吉", "i": "ジャガイモ"}, {"r": "小吉", "i": "スープ"}, {"r": "末吉", "i": "パン"}, {"r": "凶", "i": "シベリア"}])
+    f = random.choice([{"r": "大吉", "i": "特級ウォッカ"}, {"r": "中吉", "i": "追加ジャガイモ"}, {"r": "小吉", "i": "スープ"}, {"r": "末吉", "i": "パン"}, {"r": "凶", "i": "シベリア送り"}])
     await it.response.send_message(embed=discord.Embed(title="☭ 配給物資", description=f"判定: {f['r']}\n支給: {f['i']}", color=THEME_COLOR))
 
-@bot.tree.command(name="janken")
-async def janken(it: discord.Interaction):
-    await it.response.send_message(embed=discord.Embed(title="☭ 戦略的決着", color=THEME_COLOR), view=JankenView())
-
-@bot.tree.command(name="meigen")
-async def meigen(it: discord.Interaction):
-    q = random.choice(QUOTES_ARCHIVE)
-    await it.response.send_message(embed=discord.Embed(title="📜 引用", description=f"```\n{q['text']}\n```", color=THEME_COLOR).set_footer(text=q['author']))
-
-@bot.tree.command(name="roulette")
+@bot.tree.command(name="roulette", description="決定")
 async def roulette(it: discord.Interaction, options: str):
     cl = options.replace("　", " ").split()
-    await it.response.send_message(f"🏆 決定：**{random.choice(cl)}**")
+    await it.response.send_message(f"🏆 決定：**{random.choice(cl)}**" if len(cl)>1 else "❌ 選択肢不足")
 
-@bot.tree.command(name="comment")
+@bot.tree.command(name="meigen", description="金言")
+async def meigen(it: discord.Interaction):
+    q = random.choice([{"t": "学習せよ。", "a": "レーニン"}, {"t": "地球は青かった。", "a": "ガガーリン"}])
+    await it.response.send_message(embed=discord.Embed(title="📜 引用", description=f"```\n{q['t']}\n```", color=THEME_COLOR).set_footer(text=q['a']))
+
+@bot.tree.command(name="comment", description="声明")
 async def comment(it: discord.Interaction, content: str, image: Optional[discord.Attachment] = None, use_embed: bool = False):
     msg = content.replace("\\n", "\n")
     if use_embed:
@@ -232,9 +188,8 @@ async def comment(it: discord.Interaction, content: str, image: Optional[discord
     else:
         f = await image.to_file() if image else None
         await it.channel.send(content=msg, file=f)
-    await it.response.send_message("完了", ephemeral=True)
+    await it.response.send_message("配信完了", ephemeral=True)
 
-# ===== イベント =====
 @bot.event
 async def on_message(message):
     if message.author.bot: return
@@ -244,6 +199,6 @@ async def on_message(message):
 @bot.event
 async def on_ready():
     await bot.change_presence(status=discord.Status.idle, activity=discord.Activity(type=discord.ActivityType.playing, name="🎵 労働中"))
-    print(f"同志 {bot.user}、時刻のJST同期を完了。")
+    print(f"同志 {bot.user}、永続ストレージ同期完了。")
 
 bot.run(TOKEN)
