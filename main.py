@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
+from typing import Optional
 
 # ===== 基本設定 =====
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -20,7 +21,7 @@ JST = timezone(timedelta(hours=9))
 THEME_COLOR = 0xCC0000 
 DATA_FILE = "soviet_data.json"
 
-# ===== 名言データベース =====
+# ===== 名言データベース (省略せず保持) =====
 QUOTES_ARCHIVE = [
     {"text": "学習し、学習し、そして学習することだ。", "author": "ウラジーミル・レーニン", "faction": "ソビエト連邦"},
     {"text": "一人の死は悲劇だが、数百万人の死は統計上の数字に過ぎない。", "author": "ヨシフ・スターリン", "faction": "ソビエト連邦"},
@@ -44,7 +45,7 @@ class SovietBot(commands.Bot):
         self.load_data()
         try:
             await self.tree.sync()
-            print("--- 全指令システムの同期を完了した ---")
+            print("--- 全指令システムの同期を完了 ---")
         except Exception as e:
             print(f"同期失敗: {e}")
 
@@ -53,10 +54,8 @@ class SovietBot(commands.Bot):
             try:
                 with open(DATA_FILE, "r", encoding="utf-8") as f:
                     self.user_data = json.load(f)
-            except:
-                self.user_data = {}
-        else:
-            self.user_data = {}
+            except: self.user_data = {}
+        else: self.user_data = {}
 
     def save_data(self):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -66,17 +65,15 @@ class SovietBot(commands.Bot):
         now = datetime.now().timestamp()
         if user_id not in self.user_data:
             self.user_data[user_id] = {"xp": 0, "last_msg": 0}
-        
         if now - self.user_data[user_id].get("last_msg", 0) < 5:
             return
-
         self.user_data[user_id]["xp"] += random.randint(10, 20)
         self.user_data[user_id]["last_msg"] = now
         self.save_data()
 
 bot = SovietBot()
 
-# ===== じゃんけん View クラス =====
+# ===== じゃんけん View クラス (戦略的決着) =====
 class JankenView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
@@ -86,42 +83,34 @@ class JankenView(discord.ui.View):
         hands_emoji = {"グー": "✊", "チョキ": "✌️", "パー": "✋"}
         
         if user_hand == bot_hand:
-            result_text, footer = "引き分け", "両者譲らず。交渉は継続される。"
-        elif (
-            (user_hand == "グー" and bot_hand == "チョキ") or
-            (user_hand == "チョキ" and bot_hand == "パー") or
-            (user_hand == "パー" and bot_hand == "グー")
-        ):
-            result_text, footer = "勝利", "お見事です、同志！ 人民の勝利だ！"
+            res, foot = "引き分け", "両者譲らず。交渉は継続される。"
+        elif ((user_hand == "グー" and bot_hand == "チョキ") or
+              (user_hand == "チョキ" and bot_hand == "パー") or
+              (user_hand == "パー" and bot_hand == "グー")):
+            res, foot = "勝利", "お見事です、同志！ 人民の勝利だ！"
         else:
-            result_text, footer = "敗北", "資本主義的な軟弱さが露見したな。出直したまえ。"
+            res, foot = "敗北", "資本主義的な軟弱さが露見したな。"
 
         embed = discord.Embed(title="☭ 戦略的決着の結果", color=THEME_COLOR)
         embed.add_field(name="同志の手", value=f"{hands_emoji[user_hand]} {user_hand}", inline=True)
         embed.add_field(name="国家の手", value=f"{hands_emoji[bot_hand]} {bot_hand}", inline=True)
-        embed.add_field(name="判定", value=f"**{result_text}**", inline=False)
-        embed.set_footer(text=footer)
+        embed.add_field(name="判定", value=f"**{res}**", inline=False)
+        embed.set_footer(text=foot)
         await interaction.response.send_message(embed=embed)
 
     @discord.ui.button(label="強行突破", style=discord.ButtonStyle.danger, emoji="✊")
-    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.play(interaction, "グー")
- 
+    async def rock(self, it, btn): await self.play(it, "グー")
     @discord.ui.button(label="分断工作", style=discord.ButtonStyle.danger, emoji="✌️")
-    async def scissors(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.play(interaction, "チョキ")
-
+    async def sciss(self, it, btn): await self.play(it, "チョキ")
     @discord.ui.button(label="包囲作戦", style=discord.ButtonStyle.danger, emoji="✋")
-    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.play(interaction, "パー")
+    async def paper(self, it, btn): await self.play(it, "パー")
 
 # ===== イベント =====
 @bot.event
 async def on_ready():
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="同志の勤務態度"))
-    print(f"同志 {bot.user} が現線に復帰した。")
-    if not time_signal.is_running():
-        time_signal.start()
+    print(f"同志 {bot.user} 起動。")
+    if not time_signal.is_running(): time_signal.start()
 
 @bot.event
 async def on_message(message):
@@ -131,15 +120,33 @@ async def on_message(message):
 
 # ===== コマンド群 =====
 
+@bot.tree.command(name="comment", description="国家の声明としてメッセージを出力する")
+@app_commands.describe(content="声明の内容", image="添付画像 (任意)", use_embed="埋め込み形式にするか")
+async def comment(interaction: discord.Interaction, content: str, image: Optional[discord.Attachment] = None, use_embed: bool = False):
+    # 改行コード (\n) を実際の改行に変換
+    content = content.replace("\\n", "\n")
+
+    if use_embed:
+        embed = discord.Embed(description=content, color=THEME_COLOR)
+        embed.set_author(name="☭ 国家公式声明", icon_url=bot.user.display_avatar.url)
+        if image:
+            embed.set_image(url=image.url)
+        await interaction.channel.send(embed=embed)
+    else:
+        # 通常メッセージ形式
+        file = await image.to_file() if image else None
+        await interaction.channel.send(content=content, file=file)
+    
+    # 送信した本人のコマンド使用ログを隠すため、応答は非公開にする
+    await interaction.response.send_message("声明を配信した。", ephemeral=True)
+
 @bot.tree.command(name="ping", description="通信状況の確認")
 async def ping(interaction: discord.Interaction):
-    latency = round(bot.latency * 1000)
-    await interaction.response.send_message(f"通信良好。遅延: **{latency}ms**", ephemeral=True)
+    await interaction.response.send_message(f"通信良好。遅延: **{round(bot.latency * 1000)}ms**", ephemeral=True)
 
-@bot.tree.command(name="janken", description="国家との戦略的決着（じゃんけん）を行う")
+@bot.tree.command(name="janken", description="国家との戦略的決着を行う")
 async def janken(interaction: discord.Interaction):
-    embed = discord.Embed(title="☭ 戦略的選択", description="同志よ、次の一手を選択せよ。", color=THEME_COLOR)
-    await interaction.response.send_message(embed=embed, view=JankenView())
+    await interaction.response.send_message(embed=discord.Embed(title="☭ 戦略的選択", description="同志よ、次の一手を選択せよ。", color=THEME_COLOR), view=JankenView())
 
 @bot.tree.command(name="omikuji", description="本日の配給物資を受け取る")
 async def omikuji(interaction: discord.Interaction):
