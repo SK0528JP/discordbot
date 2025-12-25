@@ -13,9 +13,9 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     
-    # 次のcron起動（3時間後）と重ならないよう、170分（2時間50分）で強制終了させる
+    # 次のcron起動（3時間後）と重ならないよう、170分（2時間58分）で強制終了させる
     # これにより、ボットがゾンビ化して二重起動することを防ぐ
-    timeout-minutes: 170
+    timeout-minutes: 178
     
     steps:
       - name: Checkout code
