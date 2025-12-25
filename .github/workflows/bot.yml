@@ -3,13 +3,19 @@ name: Discord Bot
 on:
   push:
     branches: [ "*" ]
-  workflow_dispatch: # 手動実行ボタンも有効化
+  workflow_dispatch: # 手動で「Run workflow」ボタンから起動可能
+  schedule:
+    # 3時間おきに実行 (UTC: 0, 3, 6, 9, 12, 15, 18, 21時)
+    # 日本時間 (JST): 9, 12, 15, 18, 21, 0, 3, 6時
+    - cron: '0 */3 * * *'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    # 24時間以上の連続実行はGitHubの制限に触れる可能性があるが、
-    # pushのたびに新しいインスタンスが立ち上がり、Gistからデータを引き継ぐ。
+    
+    # 次のcron起動（3時間後）と重ならないよう、170分（2時間50分）で強制終了させる
+    # これにより、ボットがゾンビ化して二重起動することを防ぐ
+    timeout-minutes: 170
     
     steps:
       - name: Checkout code
@@ -27,7 +33,7 @@ jobs:
 
       - name: Run bot
         env:
-          # Repository Secretsから環境変数を注入
+          # Repository Secretsに登録した各キーをボットに注入
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
           GIST_ID: ${{ secrets.GIST_ID }}
