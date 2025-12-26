@@ -42,6 +42,7 @@ class Rbm25Bot(commands.Bot):
             "cogs.ping",
             "cogs.help",
             "cogs.status",
+            "cogs.exchange",
             "cogs.admin"
         ]
 
