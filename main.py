@@ -40,6 +40,7 @@ class Rbm25Bot(commands.Bot):
             "cogs.entertainment",
             "cogs.roulette",
             "cogs.user",
+            "cogs.ping",
             "cogs.admin"
         ]
 
