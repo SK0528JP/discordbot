@@ -35,7 +35,6 @@ class Rbm25Bot(commands.Bot):
         """
         # 読み込むコグのリスト
         cogs_list = [
-            "cogs.utility",
             "cogs.economy",
             "cogs.entertainment",
             "cogs.roulette",
