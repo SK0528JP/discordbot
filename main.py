@@ -1,132 +1,82 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import os
-import traceback
+import asyncio
 from ledger import Ledger
-from dotenv import load_dotenv
 
-# 1. 環境変数のロード
-load_dotenv()
+# --- 基本設定 ---
+# スウェーデン軍の命名規則に基づいた次世代サーバー管理インフラ
+TOKEN = os.getenv("DISCORD_TOKEN")
+GIST_ID = os.getenv("GIST_ID")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-# 2. データの初期化 (Gist同期機能付きLedger)
-# ※ledger.py 内で lang キーを扱っていても、この構成なら問題ありません
-ledger_instance = Ledger()
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
 
-class Rbm25Bot(commands.Bot):
+class Rb_m25_Bot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
-        
         super().__init__(
-            command_prefix="!", 
+            command_prefix="!",
             intents=intents,
-            status=discord.Status.online,
-            activity=discord.Activity(
-                type=discord.ActivityType.watching, 
-                name="Rb m/25 システム稼働中"
-            )
+            help_command=None
         )
 
     async def setup_hook(self):
-        """
-        モジュールの読み込みとコマンドの同期
-        """
-        # 読み込むコグのリスト
+        # 分割された専門ユニット(Cogs)の登録
         cogs_list = [
+            "cogs.status",
             "cogs.economy",
+            "cogs.admin",
             "cogs.entertainment",
             "cogs.roulette",
             "cogs.user",
             "cogs.ping",
             "cogs.help",
-            "cogs.status",
-            "cogs.exchange",
-            "cogs.admin"
+            "cogs.exchange"
         ]
-
-        print("--- Rb m/25 | 初期化シーケンス開始 ---")
-        for extension in cogs_list:
+        for cog in cogs_list:
             try:
-                await self.load_extension(extension)
-                print(f"[成功] モジュール読み込み完了: {extension}")
-            except Exception:
-                print(f"[失敗] モジュール: {extension}\n{traceback.format_exc()}")
+                await self.load_extension(cog)
+                print(f"✅ Module Loaded: {cog}")
+            except Exception as e:
+                print(f"❌ Failed to load {cog}: {e}")
 
-        # スラッシュコマンドをDiscordサーバーへ同期
-        try:
-            print("[システム] コマンドを同期中...")
-            synced = await self.tree.sync()
-            print(f"[システム] オンライン: {len(synced)} 個のコマンドを同期しました。")
-        except Exception:
-            print(f"[致命的] ツリー同期失敗:\n{traceback.format_exc()}")
+        # スラッシュコマンドの同期
+        await self.tree.sync()
+        print("🛰️ Command Tree Synced.")
 
-bot = Rbm25Bot()
+bot = Rb_m25_Bot()
+ledger_instance = Ledger(GIST_ID, GITHUB_TOKEN)
 
-# --- 3. グローバル・エラーハンドラー ---
-@bot.tree.error
-async def on_app_command_error(it: discord.Interaction, error: app_commands.AppCommandError):
-    """
-    エラー発生時に詳細をログに出力し、ユーザーに通知します
-    """
-    orig_error = getattr(error, "original", error)
+@bot.event
+async def on_ready():
+    # ステータスを「退席中 (idle)」に設定
+    # 常に背後で稼働し続けるインフラとしての佇まいを演出
+    await bot.change_presence(
+        status=discord.Status.idle, 
+        activity=discord.Game(name="Rb m/25 System Monitoring")
+    )
     
-    # クールダウン（連投防止）エラー
-    if isinstance(error, app_commands.CommandOnCooldown):
-        await it.response.send_message(f"しばらく待ってから実行してください（残り {error.retry_after:.1f}秒）", ephemeral=True)
-        return
-
-    # コンソールへの詳細出力
-    print("\n" + "!"*40)
-    print("🔴 コマンドエラー報告")
-    print(f"コマンド: /{it.command.name if it.command else '不明'}")
-    print(f"ユーザー: {it.user}")
-    print(f"エラー型: {type(orig_error).__name__}")
-    print(f"内容: {orig_error}")
-    print("-" * 20)
-    traceback.print_exception(type(orig_error), orig_error, orig_error.__traceback__)
-    print("!"*40 + "\n")
-
-    # ユーザーへの応答
-    if not it.response.is_done():
-        await it.response.send_message(
-            f"⚠️ **システムエラーが発生しました**\n型: `{type(orig_error).__name__}`\n管理者に連絡してください。", 
-            ephemeral=True
-        )
-
-# --- 4. 貢献度(XP) 蓄積ロジック ---
-last_xp_time = {}
+    print(f"--- Rb m/25 System Online ---")
+    print(f"Node Name: {bot.user.name}")
+    print(f"Node ID  : {bot.user.id}")
+    print(f"Status   : IDLE (Monitoring Mode)")
+    print(f"-----------------------------")
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
     
-    now = discord.utils.utcnow()
-    uid = message.author.id
-    
-    # 3秒に1回、2 XP を付与
-    if uid not in last_xp_time or (now - last_xp_time[uid]).total_seconds() > 3:
-        u = ledger_instance.get_user(uid)
-        u["xp"] += 2
+    # メッセージ送信による貢献度(XP)の蓄積
+    u = ledger_instance.get_user(message.author.id)
+    u["xp"] += 1
+    # 30メッセージごとに自動保存
+    if u["xp"] % 30 == 0:
         ledger_instance.save()
-        last_xp_time[uid] = now
-        
+    
     await bot.process_commands(message)
 
-# --- 5. 起動完了通知 ---
-@bot.event
-async def on_ready():
-    print("--------------------------------------------------")
-    print(f"  Rb m/25 | 日本語専用インターフェース")
-    print(f"  稼働中: {bot.user.name}")
-    print("--------------------------------------------------")
-
-# --- 6. ボットの実行 ---
-if __name__ == "__main__":
-    token = os.getenv("DISCORD_BOT_TOKEN")
-    if token:
-        bot.run(token)
-    else:
-        print("[致命的] DISCORD_BOT_TOKEN が環境変数に見つかりません。")
+# 実行
+bot.run(TOKEN)
