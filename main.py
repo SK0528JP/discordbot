@@ -4,53 +4,57 @@ import os
 import asyncio
 from ledger import Ledger
 
-# 1. データ管理ユニットの初期化
+# 1. システム・データ・レジャーの初期化
+# 各ユーザーの言語設定(lang)やXP、資産を管理します
 ledger = Ledger()
 
-class MyBot(commands.Bot):
+class Rbm25Bot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
-        # ステータスを「退席中(idle)」に、アクティビティを「システム稼働中」に設定
+        
+        # システム・アイデンティティの設定
+        # ステータスを「退席中(idle)」に、アクティビティを監視モードに設定
         super().__init__(
             command_prefix="!", 
             intents=intents,
             status=discord.Status.idle,
-            activity=discord.Activity(type=discord.ActivityType.watching, name="システム稼働状況")
+            activity=discord.Activity(
+                type=discord.ActivityType.watching, 
+                name="Rb m/25 System Status"
+            )
         )
 
     async def setup_hook(self):
-        # 拡張モジュールのロード処理
-        cog_files = ["utility", "economy", "entertainment", "admin"]
-        
-        # モジュールを手動インポートして追加
-        from cogs.utility import Utility
-        from cogs.economy import Economy
-        from cogs.entertainment import Entertainment
-        from cogs.admin import Admin
-        
-        cogs_map = {
-            "utility": Utility,
-            "economy": Economy,
-            "entertainment": Entertainment,
-            "admin": Admin
-        }
+        """
+        システムの拡張モジュール（Cogs）をロードし、
+        スラッシュコマンドをグローバルに同期します。
+        """
+        # ロード対象のモジュール定義
+        cogs_list = [
+            "cogs.utility",
+            "cogs.economy",
+            "cogs.entertainment",
+            "cogs.admin"
+        ]
 
-        for name, cog_class in cogs_map.items():
+        for extension in cogs_list:
             try:
-                await self.add_cog(cog_class(self, ledger))
-                print(f"[SYSTEM] Extension loaded: {name}")
+                # 各Cogにledgerインスタンスを渡して初期化
+                # 各Cog内で user_data["lang"] を参照することで多言語化を実現します
+                await self.load_extension(extension)
+                print(f"[SYSTEM] Module loaded: {extension}")
             except Exception as e:
-                print(f"[ERROR] Failed to load extension {name}: {e}")
+                print(f"[ERROR] Failed to load module {extension}: {e}")
 
-        # スラッシュコマンドの同期
+        # スラッシュコマンドの同期（Discord側への反映）
         await self.tree.sync()
-        print("[SYSTEM] Command synchronization completed.")
+        print("[SYSTEM] Global command synchronization completed.")
 
-bot = MyBot()
+bot = Rbm25Bot()
 
-# --- アクティビティ・ログ（XP加算処理） ---
+# --- アクティブ・ログ：貢献度(XP)蓄積ユニット ---
 last_xp_time = {}
 
 @bot.event
@@ -61,23 +65,31 @@ async def on_message(message):
     now = discord.utils.utcnow()
     uid = message.author.id
     
-    # 3秒のインターバル制限
+    # スパム防止：3秒のクールタイムを設けて貢献度(XP)を付与
     if uid not in last_xp_time or (now - last_xp_time[uid]).total_seconds() > 3:
+        # ledger.py内で lang フィールドの自動補完も行われます
         ledger.add_xp(uid, 2)
         ledger.save()
         last_xp_time[uid] = now
 
+    # プレフィックスコマンド（!）の処理を継続
     await bot.process_commands(message)
 
-# --- 起動ログ ---
+# --- 起動シーケンス・ログ ---
 @bot.event
 async def on_ready():
-    print(f"[INFO] Logged in as: {bot.user.name} (ID: {bot.user.id})")
-    print(f"[INFO] Status: {bot.status} / activity: watching System Status")
     print("--------------------------------------------------")
-    print("  Central Information System is now operational.  ")
+    print(f"  Rb m/25 | Swedish Modern System Interface")
+    print(f"  Status: Operational as {bot.user.name}")
+    print(f"  Internal ID: {bot.user.id}")
     print("--------------------------------------------------")
+    print("[LOG] Monitoring communication channels...")
 
-# 実行ユニット
-token = os.getenv("DISCORD_BOT_TOKEN")
-bot.run(token)
+# 5. システム起動
+if __name__ == "__main__":
+    # 環境変数からトークンを取得
+    token = os.getenv("DISCORD_BOT_TOKEN")
+    if token:
+        bot.run(token)
+    else:
+        print("[CRITICAL] Token not found. System initiation aborted.")
