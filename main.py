@@ -39,7 +39,8 @@ class Rb_m25_Bot(commands.Bot):
             "cogs.status", "cogs.economy", "cogs.admin",
             "cogs.entertainment", "cogs.roulette", "cogs.user",
             "cogs.ping", "cogs.help",
-"cogs.gallery", "cogs.exchange", "cogs.study"
+"cogs.gallery", "cogs.exchange",
+"cogs.fishing", "cogs.study"
         ]
         
         for cog in cogs_list:
