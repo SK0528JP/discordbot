@@ -39,6 +39,7 @@ class Rbm25Bot(commands.Bot):
             "cogs.economy",
             "cogs.entertainment",
             "cogs.roulette",
+            "cogs.user",
             "cogs.admin"
         ]
 
