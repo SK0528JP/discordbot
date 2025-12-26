@@ -7,8 +7,7 @@ from datetime import datetime
 class Study(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 勉強中ユーザーの一時メモリ (UserID: StartTime)
-        # ※このデータは再起動で消えるため、完了時にのみ Ledger へ保存します
+        # 勉強中ユーザーの開始時間を一時的に保持 (UserID: StartTime)
         self.active_sessions = {}
 
     @app_commands.command(name="study_start", description="学習任務を開始します。")
@@ -27,6 +26,7 @@ class Study(commands.Cog):
             description=f"同志 {interaction.user.display_name}、戦線へようこそ。\n集中力を維持し、目標を完遂せよ。",
             color=discord.Color.blue()
         )
+        embed.set_timestamp()
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="study_end", description="学習任務を終了し、成果を記録します。")
@@ -42,23 +42,30 @@ class Study(commands.Cog):
         elapsed_seconds = int(time.time() - start_time)
         minutes = elapsed_seconds // 60
         
-        # main.py の ledger インスタンスにデータを保存
-        # ledger.py に study_time という項目がある前提で動かします
-        user_data = self.bot.ledger.get_user(interaction.user.id)
-        if "total_study_time" not in user_data:
-            user_data["total_study_time"] = 0
-        
-        user_data["total_study_time"] += minutes
-        self.bot.ledger.save() # Gistへ保存
-        
+        # Ledgerに保存するための処理
+        if self.bot.ledger:
+            user_data = self.bot.ledger.get_user(interaction.user.id)
+            
+            # 既存のデータに 'total_study_time' がなければ 0 で初期化
+            if "total_study_time" not in user_data:
+                user_data["total_study_time"] = 0
+            
+            user_data["total_study_time"] += minutes
+            self.bot.ledger.save() # Gistへ保存
+            
+            total_time = user_data["total_study_time"]
+        else:
+            total_time = "記録失敗(Ledger無効)"
+
         embed = discord.Embed(
             title="🏁 学習任務完了",
             description=f"同志 {interaction.user.display_name}、帰還を歓迎する。",
             color=discord.Color.green()
         )
         embed.add_field(name="今回の戦果", value=f"**{minutes} 分**", inline=True)
-        embed.add_field(name="累積学習時間", value=f"**{user_data['total_study_time']} 分**", inline=True)
+        embed.add_field(name="累積学習時間", value=f"**{total_time} 分**", inline=True)
         embed.set_footer(text="Fika（休憩）を挟み、次の作戦に備えよ。")
+        embed.set_timestamp()
         
         await interaction.response.send_message(embed=embed)
 
