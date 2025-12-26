@@ -78,7 +78,7 @@ class Rb_m25_Bot(commands.Bot):
         await self.wait_until_ready()
 
     # --- ステータスメッセージ更新タスク ---
-    @tasks.loop(seconds=15)
+    @tasks.loop(seconds=5)
     async def update_status(self):
         if not self.is_ready():
             return
