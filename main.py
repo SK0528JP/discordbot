@@ -41,6 +41,8 @@ class Rbm25Bot(commands.Bot):
             "cogs.roulette",
             "cogs.user",
             "cogs.ping",
+            "cogs.help",
+            "cogs.status",
             "cogs.admin"
         ]
 
