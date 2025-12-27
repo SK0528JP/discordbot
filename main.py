@@ -1,138 +1,121 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import os
-from datetime import datetime, timedelta, timezone
-from ledger import Ledger
+import asyncio
+import json
+import requests
 
-# --- 環境設定 ---
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GIST_ID = os.getenv("GIST_ID")
-GITHUB_TOKEN = os.getenv("MY_GITHUB_TOKEN")
+# --- 1. Ledger (帳簿) システム ---
+# Gistを利用して、botが再起動してもデータを永続化する仕組み
+class Ledger:
+    def __init__(self, gist_id, github_token):
+        self.gist_id = gist_id
+        self.headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        self.data = self._load()
 
-JST = timezone(timedelta(hours=9), 'JST')
+    def _load(self):
+        """Gistからデータを読み込む"""
+        url = f"https://api.github.com/gists/{self.gist_id}"
+        response = requests.get(url, headers=self.headers)
+        if response.status_code == 200:
+            files = response.json().get('files', {})
+            content = files.get('ledger.json', {}).get('content', '{}')
+            return json.loads(content)
+        else:
+            print(f"Failed to load ledger: {response.status_code}")
+            return {}
 
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
+    def save(self):
+        """Gistにデータを保存する"""
+        url = f"https://api.github.com/gists/{self.gist_id}"
+        payload = {
+            "files": {
+                "ledger.json": {
+                    "content": json.dumps(self.data, indent=4)
+                }
+            }
+        }
+        response = requests.patch(url, headers=self.headers, json=payload)
+        if response.status_code != 200:
+            print(f"Failed to save ledger: {response.status_code}")
 
-class Rb_m25_Bot(commands.Bot):
+    def get_user(self, user_id):
+        """ユーザーデータを取得、存在しなければ初期化"""
+        uid = str(user_id)
+        if uid not in self.data:
+            self.data[uid] = {
+                "money": 100,      # 初期所持金
+                "xp": 0,           # 初期経験値
+                "level": 1,        # 初期レベル
+                "inventory": [],   # アイテム
+                "is_studying": False,
+                "study_history": {},
+                "fishing_inventory": []
+            }
+        return self.data[uid]
+
+# --- 2. Bot クラスの定義 ---
+class Rbm25E(commands.Bot):
     def __init__(self):
-        super().__init__(
-            command_prefix="!",
-            intents=intents,
-            help_command=None
-        )
-        self.start_time = datetime.now(JST)
+        intents = discord.Intents.all()
+        # Rb m/25E のプレフィックス設定（スラッシュコマンドメインだが一応設定）
+        super().__init__(command_prefix="!", intents=intents)
         
-        # Ledgerの初期化
-        self.ledger = Ledger(GIST_ID, GITHUB_TOKEN) if GIST_ID and GITHUB_TOKEN else None
+        # 環境変数から設定を読み込み
+        self.gist_id = os.getenv("GIST_ID")
+        self.github_token = os.getenv("GITHUB_TOKEN")
+        self.token = os.getenv("DISCORD_TOKEN")
         
-        # 既存Cogが「from __main__ import ledger_instance」としている場合に対応
-        global ledger_instance
-        ledger_instance = self.ledger
+        # 帳簿インスタンスの作成
+        self.ledger = Ledger(self.gist_id, self.github_token)
 
     async def setup_hook(self):
-        print("--- [SYSTEM BOOT] ---")
-        
-        # Cogの読み込みリスト
+        """起動時にCogをロードし、コマンドを同期する"""
         cogs_list = [
-            "cogs.status", "cogs.economy", "cogs.admin",
-            "cogs.entertainment", "cogs.roulette", "cogs.user",
-            "cogs.ping", "cogs.help",
-"cogs.gallery", "cogs.exchange",
-"cogs.ranking",
-"cogs.fishing", "cogs.study"
+            "cogs.admin",
+            "cogs.economy",
+            "cogs.entertainment",
+            "cogs.exchange",
+            "cogs.fishing",
+            "cogs.gallery",
+            "cogs.help",
+            "cogs.ping",
+            "cogs.ranking",
+            "cogs.roulette",
+            "cogs.status",
+            "cogs.study",
+            "cogs.user"
         ]
-        
+
         for cog in cogs_list:
             try:
                 await self.load_extension(cog)
-                print(f"✅ Loaded: {cog}")
+                print(f"✅ Loaded {cog}")
             except Exception as e:
-                print(f"❌ Failed: {cog} | {e}")
+                print(f"❌ Failed to load {cog}: {e}")
 
-        # グローバル同期（GUILD_IDを使わず全体に反映）
-        try:
-            print("🛰️ Synchronizing global commands...")
-            await self.tree.sync()
-            print("✨ Global sync requested.")
-        except Exception as e:
-            print(f"⚠️ Sync failed: {e}")
+        # スラッシュコマンドをDiscordサーバーに同期
+        await self.tree.sync()
+        print("🔄 Slash commands synced.")
 
-        # ループタスクの開始
-        self.update_status.start()
-        self.auto_save.start()
-
-    # --- 定期的な自動保存タスク (10分ごと) ---
-    @tasks.loop(minutes=10)
-    async def auto_save(self):
-        if self.ledger:
-            try:
-                self.ledger.save()
-                print(f"💾 [AUTO-SAVE] {datetime.now(JST).strftime('%H:%M')} データをGistに同期しました。")
-            except Exception as e:
-                print(f"❌ [AUTO-SAVE ERROR] {e}")
-
-    @auto_save.before_loop
-    async def before_auto_save(self):
-        await self.wait_until_ready()
-
-    # --- ステータスメッセージ更新タスク ---
-    @tasks.loop(seconds=5)
-    async def update_status(self):
-        if not self.is_ready():
-            return
+    async def on_ready(self):
+        """起動完了時の処理"""
+        print(f"--- Rb m/25E (Exklusiv Edition) ---")
+        print(f"Logged in as: {self.user.name} ({self.user.id})")
+        print(f"Status: Online & Stable")
+        print(f"-----------------------------------")
         
-        try:
-            # レイテンシの計算
-            latency = round(self.latency * 1000)
-            
-            # アップタイムの計算
-            now = datetime.now(JST)
-            uptime = now - self.start_time
-            hours, remainder = divmod(int(uptime.total_seconds()), 3600)
-            minutes, _ = divmod(remainder, 60)
-            
-            # 曜日と時刻のフォーマット
-            wd_list = ["月", "火", "水", "木", "金", "土", "日"]
-            time_str = now.strftime(f"%Y/%m/%d({wd_list[now.weekday()]}) %H:%M")
-            
-            # ステータス表示: Lat | Up | Time
-            status_text = f"Lat: {latency}ms | Up: {hours}h {minutes}m | {time_str} JST"
-            
-            await self.change_presence(
-                status=discord.Status.idle,
-                activity=discord.Activity(type=discord.ActivityType.watching, name=status_text)
-            )
-        except Exception as e:
-            print(f"❌ status_loop Error: {e}")
+        # アクティビティの設定
+        await self.change_presence(activity=discord.Game(name="/help | Rb m/25E"))
 
-# 他のCogが参照するためのグローバル変数初期化
-ledger_instance = None
-bot = Rb_m25_Bot()
+# --- 3. 実行 ---
+bot = Rbm25E()
 
-@bot.event
-async def on_ready():
-    print(f"--- Rb m/25 System Online ---")
-    print(f"Logged in as: {bot.user.name}")
-    print(f"-----------------------------")
+# 各Cogからアクセスできるようにグローバルに公開
+ledger_instance = bot.ledger
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-    
-    # メッセージごとのXP加算と、30回ごとの保存
-    if bot.ledger:
-        try:
-            u = bot.ledger.get_user(message.author.id)
-            u["xp"] = u.get("xp", 0) + 1
-            if u["xp"] % 30 == 0:
-                bot.ledger.save()
-        except Exception as e:
-            print(f"❌ on_message Ledger Error: {e}")
-
-    await bot.process_commands(message)
-
-if TOKEN:
-    bot.run(TOKEN)
+if __name__ == "__main__":
+    asyncio.run(bot.start(bot.token))
