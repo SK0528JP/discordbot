@@ -7,9 +7,8 @@ import aiohttp
 import re
 
 class AIChat(commands.Cog):
-    # --- 重要：コマンドグループの定義 ---
-    # クラスの直下で定義することで、自動的に /ai がツリーに登録されます
-    ai_group = app_commands.Group(name="ai", description="Gemini知能中枢による支援機能")
+    # クラス変数としてグループを定義（コマンド出現用）
+    ai_group = app_commands.Group(name="ai", description="Gemini知能中枢")
 
     def __init__(self, bot):
         self.bot = bot
@@ -17,6 +16,8 @@ class AIChat(commands.Cog):
         
         if self.api_key:
             genai.configure(api_key=self.api_key)
+            # 【重要】モデル名を 'models/' 抜きで指定
+            # かつ、内部的に v1 エンドポイントを使用するよう明示的に設定（ライブラリのバグ回避）
             self.model = genai.GenerativeModel('gemini-1.5-flash')
         else:
             self.model = None
@@ -24,15 +25,22 @@ class AIChat(commands.Cog):
     async def generate_response(self, contents):
         if not self.model:
             return "❌ APIキーが未設定です。"
+        
         try:
-            response = await self.model.generate_content_async(contents)
+            # 【核心】request_options で API バージョンを "v1" に強制します
+            # これにより、エラーの原因である "v1beta" の使用を回避します
+            response = await self.model.generate_content_async(
+                contents,
+                request_options={"api_version": "v1"}
+            )
+            
             if response and response.text:
                 return response.text
             return "⚠️ 回答を生成できませんでした。"
+            
         except Exception as e:
             return f"⚠️ 接続エラー: {str(e)}"
 
-    # --- グループ内コマンド ---
     @ai_group.command(name="ask", description="テキストで質問します")
     @app_commands.describe(prompt="質問内容")
     async def ask(self, interaction: discord.Interaction, prompt: str):
@@ -41,11 +49,11 @@ class AIChat(commands.Cog):
         await interaction.followup.send(f"🤖 **AI回答:**\n{answer[:1900]}")
 
     @ai_group.command(name="image", description="画像を解析します")
-    @app_commands.describe(attachment="画像ファイル", prompt="質問（任意）")
-    async def image(self, interaction: discord.Interaction, attachment: discord.Attachment, prompt: str = "この画像について説明してください"):
+    @app_commands.describe(attachment="画像ファイル", prompt="質問")
+    async def image(self, interaction: discord.Interaction, attachment: discord.Attachment, prompt: str = "説明してください"):
         await interaction.response.defer()
         if not attachment.content_type.startswith('image/'):
-            return await interaction.followup.send("❌ 画像ファイルを添付してください。")
+            return await interaction.followup.send("❌ 画像を選択してください。")
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -58,7 +66,6 @@ class AIChat(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"⚠️ 解析エラー: {str(e)}")
 
-    # --- メンション応答 ---
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot: return
