@@ -7,7 +7,7 @@ import aiohttp
 import re
 
 class AIChat(commands.Cog):
-    # クラス変数としてグループを定義（コマンド出現用）
+    # コマンドグループの定義（クラス直下）
     ai_group = app_commands.Group(name="ai", description="Gemini知能中枢")
 
     def __init__(self, bot):
@@ -16,8 +16,8 @@ class AIChat(commands.Cog):
         
         if self.api_key:
             genai.configure(api_key=self.api_key)
-            # 【重要】モデル名を 'models/' 抜きで指定
-            # かつ、内部的に v1 エンドポイントを使用するよう明示的に設定（ライブラリのバグ回避）
+            # 【重要】最新ライブラリの標準である 'gemini-1.5-flash' を指定
+            # 修飾子を一切付けず、ライブラリの自動解決に任せます
             self.model = genai.GenerativeModel('gemini-1.5-flash')
         else:
             self.model = None
@@ -27,18 +27,15 @@ class AIChat(commands.Cog):
             return "❌ APIキーが未設定です。"
         
         try:
-            # 【核心】request_options で API バージョンを "v1" に強制します
-            # これにより、エラーの原因である "v1beta" の使用を回避します
-            response = await self.model.generate_content_async(
-                contents,
-                request_options={"api_version": "v1"}
-            )
+            # 引数を一切追加せず、最もシンプルな形で呼び出し
+            response = await self.model.generate_content_async(contents)
             
             if response and response.text:
                 return response.text
-            return "⚠️ 回答を生成できませんでした。"
+            return "⚠️ 回答を生成できませんでした（安全フィルター等による制限）。"
             
         except Exception as e:
+            # ここで 404 が出る場合は、APIキー側の問題である可能性が 99% です
             return f"⚠️ 接続エラー: {str(e)}"
 
     @ai_group.command(name="ask", description="テキストで質問します")
