@@ -41,6 +41,7 @@ class Rb_m25_Bot(commands.Bot):
             "cogs.ping", "cogs.help",
 "cogs.gallery", "cogs.exchange",
 "cogs.ranking",
+"cogs.server",
 "cogs.fishing", "cogs.study"
         ]
         
