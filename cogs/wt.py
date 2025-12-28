@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import aiohttp
+import asyncio
 
 COUNTRIES = {
     "usa": "🇺🇸 USA", "germany": "🇩🇪 Germany", "ussr": "🇷🇺 USSR",
@@ -14,19 +15,21 @@ CATEGORIES = {
 }
 
 class WTVehicleSelect(discord.ui.Select):
-    def __init__(self, options):
+    def __init__(self, options, category):
         super().__init__(placeholder="調査する兵器を選択してください...", options=options)
+        self.category = category
 
     async def callback(self, interaction: discord.Interaction):
-        # 1. まず即座に応答（defer）して3秒ルールを回避
+        # 3秒ルール回避のため即座に応答
         await interaction.response.defer()
         
         v_id = self.values[0]
-        url = "https://www.wtvehiclesapi.repository.guru/api/vehicles/all"
+        # 重い /all ではなく、カテゴリ別エンドポイントから取得
+        url = f"https://www.wtvehiclesapi.repository.guru/api/vehicles/{self.category}"
         
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(url, timeout=10) as resp:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=5) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         res = data.get(v_id)
@@ -39,66 +42,69 @@ class WTVehicleSelect(discord.ui.Select):
                             embed.add_field(name="BR", value=res.get('br', '不明'), inline=True)
                             if 'image_url' in res:
                                 embed.set_image(url=res['image_url'])
-                            # 2. followup.send で後から結果を送信
                             return await interaction.followup.send(embed=embed)
-            except Exception as e:
-                return await interaction.followup.send(f"⚠️ 通信エラー: {e}")
-        await interaction.followup.send("❌ データの取得に失敗しました。")
+        except Exception as e:
+            return await interaction.followup.send(f"⚠️ 詳細取得エラー: サーバーが混雑しています。")
 
 class WarThunder(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.api_base = "https://www.wtvehiclesapi.repository.guru/api/vehicles"
 
-    @app_commands.command(name="wt", description="War Thunder兵器カタログを閲覧します")
+    @app_commands.command(name="wt", description="War Thunder兵器カタログ（高速版）")
     async def wt(self, interaction: discord.Interaction):
-        # 最初のコマンド実行時に defer は不要（即座にViewを出すため）
         view = discord.ui.View(timeout=60)
         select = discord.ui.Select(placeholder="国家を選択してください...")
         for code, label in COUNTRIES.items():
             select.add_item(discord.SelectOption(label=label, value=code))
 
         async def country_callback(it: discord.Interaction):
-            # 重要：ボタンを出す前に、この操作に対して「考え中」の状態を作る
+            # 選択された国家を一時保存して次のメニューへ
             await it.response.defer(ephemeral=True)
-            
             country_code = select.values[0]
-            cat_view = discord.ui.View(timeout=60)
             
+            cat_view = discord.ui.View(timeout=60)
             for cat_id, cat_label in CATEGORIES.items():
                 button = discord.ui.Button(label=cat_label, custom_id=f"{country_code}_{cat_id}")
                 
                 async def btn_callback(btn_it: discord.Interaction):
-                    # 重要：ボタンクリックに対しても即座に defer
                     await btn_it.response.defer(ephemeral=True)
-                    
                     c_code, c_id = btn_it.data['custom_id'].split('_')
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(f"{self.api_base}/{c_id}", timeout=10) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
-                                filtered = {k: v for k, v in data.items() if v.get('country') == c_code}
-                                if not filtered:
-                                    return await btn_it.followup.send(f"❌ データなし")
-                                
-                                # 兵器リストを表示
-                                options = []
-                                for v_id, v_info in list(filtered.items())[:25]:
-                                    name = v_info.get('name', v_id)[:50]
-                                    options.append(discord.SelectOption(label=name, value=v_id))
-                                
-                                next_view = discord.ui.View()
-                                next_view.add_item(WTVehicleSelect(options))
-                                await btn_it.followup.send(f"📂 {COUNTRIES[c_code]} リスト:", view=next_view)
-                
+                    
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            # 巨大な all は使わず、カテゴリ単位(tanks等)で取得
+                            async with session.get(f"{self.api_base}/{c_id}", timeout=5) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    # 国家フィルタリング
+                                    filtered = {k: v for k, v in data.items() if v.get('country') == c_code}
+                                    
+                                    if not filtered:
+                                        return await btn_it.followup.send("❌ 指定国家のデータがこのカテゴリにありません。")
+                                    
+                                    # セレクトメニュー作成
+                                    options = []
+                                    for v_id, v_info in list(filtered.items())[:25]:
+                                        name = v_info.get('name', v_id)[:50]
+                                        options.append(discord.SelectOption(label=name, value=v_id))
+                                    
+                                    final_view = discord.ui.View()
+                                    final_view.add_item(WTVehicleSelect(options, c_id))
+                                    await btn_it.followup.send(f"📂 {COUNTRIES[c_code]} リストを表示します:", view=final_view)
+                                else:
+                                    await btn_it.followup.send("⚠️ APIサーバーが応答しませんでした。")
+                    except asyncio.TimeoutError:
+                        await btn_it.followup.send("⏳ 接続タイムアウト。もう一度お試しください。")
+
                 button.callback = btn_callback
                 cat_view.add_item(button)
             
-            await it.followup.send(f"📍 カテゴリを選択してください。", view=cat_view)
+            await it.followup.send(f"📍 国家: {COUNTRIES[country_code]}。カテゴリを選択:", view=cat_view)
 
         select.callback = country_callback
         view.add_item(select)
-        await interaction.response.send_message("🛠️ **Rb m/25E 戦術データベース**", view=view)
+        await interaction.response.send_message("🛠️ **Rb m/25E 兵器データベース**", view=view)
 
 async def setup(bot):
     await bot.add_cog(WarThunder(bot))
