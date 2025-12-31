@@ -44,6 +44,7 @@ class Rb_m25_Bot(commands.Bot):
 "cogs.server",
 "cogs.wt",
 "cogs.ai",
+"cogs.countdown",
 "cogs.fishing", "cogs.study"
         ]
         
