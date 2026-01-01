@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from ledger import Ledger
 
-# --- 環境設定 ---
+# --- 環境設定 --- 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GIST_ID = os.getenv("GIST_ID")
 GITHUB_TOKEN = os.getenv("MY_GITHUB_TOKEN")
