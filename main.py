@@ -11,9 +11,12 @@ GITHUB_TOKEN = os.getenv("MY_GITHUB_TOKEN")
 
 JST = timezone(timedelta(hours=9), 'JST')
 
+# --- 権限設定 (Intents) ---
+# ⚠️ User Cogでのステータス/アクティビティ取得に必須
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.presences = True  # <--- これを追加しました！
 
 class Rb_m25_Bot(commands.Bot):
     def __init__(self):
@@ -36,16 +39,23 @@ class Rb_m25_Bot(commands.Bot):
         
         # Cogの読み込みリスト
         cogs_list = [
-            "cogs.status", "cogs.economy", "cogs.admin",
-            "cogs.entertainment", "cogs.roulette", "cogs.user",
-            "cogs.ping", "cogs.help",
-"cogs.gallery", "cogs.exchange",
-"cogs.ranking",
-"cogs.server",
-"cogs.wt",
-"cogs.ai",
-"cogs.countdown",
-"cogs.fishing", "cogs.study"
+            "cogs.status", 
+            "cogs.economy", 
+            "cogs.admin",
+            "cogs.entertainment", 
+            "cogs.roulette", 
+            "cogs.user",       # 精密調査ユニット
+            "cogs.ping", 
+            "cogs.help",
+            "cogs.gallery", 
+            "cogs.exchange",
+            "cogs.ranking",
+            "cogs.server",
+            "cogs.wt",         # 兵器データユニット
+            "cogs.ai",
+            "cogs.countdown",  # 戦術時計ユニット
+            "cogs.fishing", 
+            "cogs.study"
         ]
         
         for cog in cogs_list:
@@ -55,7 +65,7 @@ class Rb_m25_Bot(commands.Bot):
             except Exception as e:
                 print(f"❌ Failed: {cog} | {e}")
 
-        # グローバル同期（GUILD_IDを使わず全体に反映）
+        # グローバル同期
         try:
             print("🛰️ Synchronizing global commands...")
             await self.tree.sync()
@@ -82,7 +92,8 @@ class Rb_m25_Bot(commands.Bot):
         await self.wait_until_ready()
 
     # --- ステータスメッセージ更新タスク ---
-    @tasks.loop(seconds=5)
+    # API保護のため 5秒 -> 60秒 に変更
+    @tasks.loop(seconds=60)
     async def update_status(self):
         if not self.is_ready():
             return
@@ -111,7 +122,7 @@ class Rb_m25_Bot(commands.Bot):
         except Exception as e:
             print(f"❌ status_loop Error: {e}")
 
-# 他のCogが参照するためのグローバル変数初期化
+# グローバル変数初期化
 ledger_instance = None
 bot = Rb_m25_Bot()
 
@@ -119,6 +130,7 @@ bot = Rb_m25_Bot()
 async def on_ready():
     print(f"--- Rb m/25 System Online ---")
     print(f"Logged in as: {bot.user.name}")
+    print(f"ID: {bot.user.id}")
     print(f"-----------------------------")
 
 @bot.event
