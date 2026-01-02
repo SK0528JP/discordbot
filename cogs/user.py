@@ -1,166 +1,213 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+from datetime import datetime
 
 class User(commands.Cog):
     def __init__(self, bot, ledger):
         self.bot = bot
         self.ledger = ledger
 
-    @app_commands.command(name="user", description="ユーザーの全公開情報を最大限に調査・表示します")
-    @app_commands.describe(target="ユーザーのメンション、またはユーザーIDを入力してください")
-    async def user_info(self, it: discord.Interaction, target: str = None):
-        """
-        指定したユーザーの公開情報を限界まで取得し、詳細なプロファイルを作成します。
-        """
-        await it.response.defer()
-
-        user_obj = None
-        is_member = False
-
-        # 1. ターゲットの特定
-        if target is None:
-            user_obj = it.user
-            is_member = True
-        else:
-            clean_id = target.replace("<@", "").replace(">", "").replace("!", "").replace("&", "")
-            if clean_id.isdigit():
-                try:
-                    # サーバー内メンバーとして取得試行
-                    if it.guild:
-                        user_obj = it.guild.get_member(int(clean_id))
-                    
-                    if user_obj:
-                        is_member = True
-                    else:
-                        # サーバー外のユーザーをAPIから直接取得
-                        user_obj = await self.bot.fetch_user(int(clean_id))
-                except Exception:
-                    user_obj = None
-            else:
-                await it.followup.send("❌ 有効なユーザーID、またはメンションを入力してください。", ephemeral=True)
-                return
-
-        if user_obj is None:
-            await it.followup.send("❌ ユーザーを特定できませんでした。IDが正しいか確認してください。", ephemeral=True)
-            return
-
-        # 2. データの収集 (Rb m/25 Economy)
-        u_data = self.ledger.get_user(user_obj.id)
-        avatar_url = user_obj.display_avatar.url
-        
-        # 色の設定（メンバーなら最高位ロールの色、そうでなければデフォルト）
-        # 北欧デザイン的スレートグレーをデフォルトに
-        color = user_obj.color if is_member and user_obj.color.value != 0 else 0x4C566A
-
-        embed = discord.Embed(title=f"🔍 ユーザー精密調査レポート", color=color)
-        embed.set_thumbnail(url=avatar_url)
-        embed.description = f"**[{user_obj.name}]( {avatar_url} )** のプロファイル詳細"
-
-        # --- フィールド1: アカウント基本情報 ---
-        creation_time = f"<t:{int(user_obj.created_at.timestamp())}:D> (<t:{int(user_obj.created_at.timestamp())}:R>)"
-        
-        # フラグ（バッジ）の取得
+    # --- ヘルパー関数: バッジ（フラグ）の解析 ---
+    def get_user_badges(self, user):
         badges = []
-        flags = user_obj.public_flags
+        flags = user.public_flags
+        
         if flags.staff: badges.append("Discord Staff")
         if flags.partner: badges.append("Partner")
         if flags.hypesquad: badges.append("HypeSquad")
         if flags.bug_hunter: badges.append("Bug Hunter")
         if flags.active_developer: badges.append("Active Dev")
         if flags.verified_bot: badges.append("Verified Bot")
+        if flags.early_supporter: badges.append("Early Supporter")
         
-        badge_str = ", ".join(badges) if badges else "なし"
+        return ", ".join(badges) if badges else "No Special Badges"
 
-        basic_info = (
-            f"**ID**: `{user_obj.id}`\n"
-            f"**タイプ**: {'🤖 ボット' if user_obj.bot else '👤 ユーザー'}\n"
-            f"**アカウント作成**: {creation_time}\n"
-            f"**公的バッジ**: {badge_str}"
+    # --- ヘルパー関数: 接続デバイスの特定 ---
+    def get_device_status(self, member):
+        if str(member.status) == "offline":
+            return ""
+        
+        devices = []
+        if member.desktop_status != discord.Status.offline: devices.append("💻 PC")
+        if member.mobile_status != discord.Status.offline: devices.append("📱 Mobile")
+        if member.web_status != discord.Status.offline: devices.append("🌐 Web")
+        
+        return " / ".join(devices) if devices else "Unknown Device"
+
+    # --- コマンド本体 ---
+    @app_commands.command(name="user", description="対象の公開情報・ステータス・資産状況を精密調査します")
+    @app_commands.describe(target="ユーザーID、またはメンション（未入力で自分を調査）")
+    async def user_info(self, it: discord.Interaction, target: str = None):
+        await it.response.defer()
+
+        # 1. ターゲットの特定とオブジェクト取得
+        user_obj = None
+        is_member = False # サーバーメンバーかどうかのフラグ
+
+        if target is None:
+            user_obj = it.user
+            is_member = True
+        else:
+            # IDのクリーニング (<@1234...> -> 1234...)
+            clean_id = target.replace("<@", "").replace(">", "").replace("!", "").replace("&", "")
+            
+            if clean_id.isdigit():
+                try:
+                    # まずサーバー内メンバーとして検索（アクティビティ取得のため重要）
+                    if it.guild:
+                        user_obj = it.guild.get_member(int(clean_id))
+                    
+                    if user_obj:
+                        is_member = True
+                    else:
+                        # サーバーにいない場合はAPIから基本情報だけ取得
+                        user_obj = await self.bot.fetch_user(int(clean_id))
+                except Exception:
+                    user_obj = None
+
+        # 特定失敗時の処理
+        if user_obj is None:
+            embed_error = discord.Embed(
+                description="❌ **Target Lost.**\n有効なユーザーIDまたはメンションを指定してください。",
+                color=0xFF5555
+            )
+            await it.followup.send(embed=embed_error, ephemeral=True)
+            return
+
+        # 2. 経済データの取得 (Ledger)
+        # データがない場合はデフォルト値 (0) を使用してエラー回避
+        u_data = {"money": 0, "xp": 0, "joined_at": "Unregistered"}
+        if self.ledger:
+            try:
+                raw_data = self.ledger.get_user(user_obj.id)
+                if raw_data:
+                    u_data = raw_data
+            except Exception:
+                pass # 取得失敗時も処理を続行
+
+        # 3. Embedデザインの構築
+        # 北欧デザイン: オフラインや一般ユーザーは落ち着いたスレートグレー(0x4C566A)
+        # メンバーかつ色設定がある場合のみ、その色を使用
+        accent_color = 0x4C566A
+        if is_member and user_obj.color.value != 0:
+            accent_color = user_obj.color
+
+        embed = discord.Embed(
+            title=f"Investigation Report: {user_obj.name}",
+            color=accent_color,
+            timestamp=datetime.now()
         )
-        embed.add_field(name="📌 基本データ", value=basic_info, inline=False)
+        embed.set_thumbnail(url=user_obj.display_avatar.url)
 
-        # --- フィールド2: サーバー内情報 & ステータス (メンバーの場合のみ) ---
+        # --- Section A: Identity (基本識別情報) ---
+        created_ts = int(user_obj.created_at.timestamp())
+        badge_str = self.get_user_badges(user_obj)
+        
+        identity_val = (
+            f"**UID**: `{user_obj.id}`\n"
+            f"**Type**: {'🤖 Bot' if user_obj.bot else '👤 User'}\n"
+            f"**Created**: <t:{created_ts}:D> (<t:{created_ts}:R>)\n"
+            f"**Badges**: {badge_str}"
+        )
+        embed.add_field(name="🆔 Identity", value=identity_val, inline=False)
+
+        # --- Section B: Server Presence (サーバー内情報) ---
+        # メンバーである場合のみ表示（fetch_userでは取得不可能）
         if is_member:
             # 参加日
-            join_time = f"<t:{int(user_obj.joined_at.timestamp())}:D> (<t:{int(user_obj.joined_at.timestamp())}:R>)"
+            joined_ts = int(user_obj.joined_at.timestamp())
             
-            # ロール
-            roles = [role.mention for role in reversed(user_obj.roles) if role.name != "@everyone"]
-            role_str = " ".join(roles[:8]) + ("..." if len(roles) > 8 else "")
+            # ロール (Everyoneを除外、上位6つを表示)
+            roles = [r.mention for r in reversed(user_obj.roles) if r.name != "@everyone"]
+            role_str = " ".join(roles[:6])
+            if len(roles) > 6: role_str += "..."
             
-            # 権限チェック
+            # 重要権限のチェック
             key_perms = []
-            perms = user_obj.guild_permissions
-            if perms.administrator: key_perms.append("⚡ 管理者")
-            elif perms.manage_guild: key_perms.append("🛡️ サーバー管理")
-            if perms.ban_members: key_perms.append("🚫 BAN権限")
-            if perms.manage_messages: key_perms.append("💬 メッセージ管理")
-            perm_str = ", ".join(key_perms) if key_perms else "一般権限"
+            p = user_obj.guild_permissions
+            if p.administrator: key_perms.append("⚡ Administrator")
+            elif p.manage_guild: key_perms.append("🛡️ Manager")
+            if p.ban_members: key_perms.append("🚫 Ban Hammer")
+            perm_str = ", ".join(key_perms) if key_perms else "Standard"
 
-            # 接続ステータスと端末
-            status_map = {
-                discord.Status.online: "🟢 オンライン",
-                discord.Status.idle: "🌙 退席中",
-                discord.Status.dnd: "🔴 取り込み中",
-                discord.Status.offline: "⚪ オフライン",
-                discord.Status.invisible: "⚪ オフライン(隠れ)"
-            }
-            current_status = status_map.get(user_obj.status, "不明")
-            
-            # 端末特定 (オンライン系の場合のみ有効)
-            devices = []
-            if str(user_obj.status) != "offline":
-                if user_obj.desktop_status != discord.Status.offline: devices.append("💻 PC")
-                if user_obj.mobile_status != discord.Status.offline: devices.append("📱 Mobile")
-                if user_obj.web_status != discord.Status.offline: devices.append("🌐 Web")
-            device_str = " / ".join(devices) if devices else ""
-
-            member_info = (
-                f"**サーバー参加**: {join_time}\n"
-                f"**主要ロール**: {role_str if role_str else 'なし'}\n"
-                f"**権限レベル**: {perm_str}\n"
-                f"**ステータス**: {current_status} {device_str}"
+            presence_val = (
+                f"**Joined**: <t:{joined_ts}:D> (<t:{joined_ts}:R>)\n"
+                f"**Roles**: {role_str if role_str else 'None'}\n"
+                f"**Clearance**: {perm_str}"
             )
-            embed.add_field(name="🏠 サーバー・プレゼンス情報", value=member_info, inline=False)
+            embed.add_field(name="🏠 Server Status", value=presence_val, inline=False)
 
-            # --- フィールド2.5: アクティビティ (現在何をしているか) ---
+            # --- Section C: Real-time Activity (現在のアクティビティ) ---
+            # ここがSpotify修正の肝。複数のアクティビティをすべて解析する。
+            
+            # ステータス表示
+            status_map = {
+                discord.Status.online: "🟢 Online",
+                discord.Status.idle: "🌙 Idle",
+                discord.Status.dnd: "🔴 DND",
+                discord.Status.offline: "⚪ Offline",
+                discord.Status.invisible: "⚪ Offline"
+            }
+            curr_stat = status_map.get(user_obj.status, "Unknown")
+            device_str = self.get_device_status(user_obj)
+            
+            activity_list = []
+            
+            # アクティビティ解析ループ
             if user_obj.activities:
-                activity_lines = []
                 for act in user_obj.activities:
+                    # 1. Spotify (最優先)
                     if isinstance(act, discord.Spotify):
-                        activity_lines.append(f"🎵 **Spotify**: {act.title} - {act.artist}")
+                        # リンクを作成してUX向上
+                        track_link = f"[{act.title}](https://open.spotify.com/track/{act.track_id})"
+                        activity_list.append(f"🎵 **Spotify**: {track_link} by {act.artist}")
+                    
+                    # 2. Game
                     elif isinstance(act, discord.Game):
-                        activity_lines.append(f"🎮 **Game**: {act.name}")
+                        start_info = ""
+                        if act.start:
+                            start_info = f" (<t:{int(act.start.timestamp())}:R>)"
+                        activity_list.append(f"🎮 **Game**: {act.name}{start_info}")
+                    
+                    # 3. Streaming
                     elif isinstance(act, discord.Streaming):
-                        activity_lines.append(f"📡 **Streaming**: {act.name}")
+                        activity_list.append(f"📡 **Live**: [{act.name}]({act.url})")
+                    
+                    # 4. Custom Status
                     elif isinstance(act, discord.CustomActivity):
-                        emoji = f"{act.emoji} " if act.emoji else ""
-                        activity_lines.append(f"📝 **Status**: {emoji}{act.name}")
-                    else:
-                        activity_lines.append(f"🔹 {act.name}")
-                
-                if activity_lines:
-                    embed.add_field(name="🚀 現在のアクティビティ", value="\n".join(activity_lines), inline=False)
+                        c_text = ""
+                        if act.emoji: c_text += str(act.emoji) + " "
+                        if act.name: c_text += act.name
+                        if c_text:
+                            activity_list.append(f"📝 **Status**: {c_text}")
+            
+            # アクティビティ情報の結合
+            act_content = f"**Condition**: {curr_stat} {device_str}\n"
+            if activity_list:
+                act_content += "\n".join(activity_list)
+            else:
+                act_content += "No active signal."
 
-        # --- フィールド3: Rb m/25 システムデータ ---
-        sys_info = (
-            f"💰 **保有資産**: {u_data.get('money', 0):,} cr\n"
-            f"✨ **貢献度 (XP)**: {u_data.get('xp', 0):,} XP\n"
-            f"📅 **システム登録**: `{u_data.get('joined_at', '記録なし')}`"
+            embed.add_field(name="🚀 Live Activity", value=act_content, inline=False)
+
+        # --- Section D: Rb m/25 Economy (経済データ) ---
+        sys_val = (
+            f"**Assets**: `{u_data.get('money', 0):,} cr`\n"
+            f"**Exp**: `{u_data.get('xp', 0):,} xp`"
         )
-        embed.add_field(name="💎 Rb m/25 内部データ", value=sys_info, inline=False)
+        embed.add_field(name="💎 System Data", value=sys_val, inline=True)
 
-        # --- フッター ---
-        footer_text = f"Rb m/25 Tactical System | User ID: {user_obj.id}"
-        if user_obj.id == 840821281838202880:
-             footer_text = "⚠️ Rb m/25 System Administrator | " + footer_text
+        # フッター
+        ft_text = f"Rb m/25 Tactical System | AID: {user_obj.id}"
+        if user_obj.id == 840821281838202880: # 管理者ID
+             ft_text = "⚠️ Rb m/25 System Admin | " + ft_text
         
-        embed.set_footer(text=footer_text)
+        embed.set_footer(text=ft_text)
 
         await it.followup.send(embed=embed)
 
 async def setup(bot):
-    # main.py の ledger_instance を参照
+    # main.py の global変数からLedgerインスタンスを安全にインポート
     from __main__ import ledger_instance
     await bot.add_cog(User(bot, ledger_instance))
