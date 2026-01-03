@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rb m/25E | 汎用北欧風便利Bot</title>
+    <style>
+        :root {
+            /* アイコン由来のアクセントカラー */
+            --accent-blue: #004b93;
+            --accent-gold: #f6d000;
+            /* 北欧モダンベースカラー */
+            --nord0: #2e3440; /* 背景深色 */
+            --nord1: #3b4252; /* カード背景 */
+            --nord3: #4c566a; /* 境界線・サブテキスト */
+            --nord4: #d8dee9; /* メインテキスト */
+            --nord6: #eceff4; /* 見出し強調 */
+            --nord8: #88c0d0; /* リンク・ハイライト */
+        }
+
+        body {
+            background-color: var(--nord0);
+            color: var(--nord4);
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.7;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* ヘッダーデザイン：アイコン画像を背景に調和させる */
+        header {
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--nord0) 100%);
+            padding: 60px 20px;
+            text-align: center;
+            border-bottom: 4px solid var(--accent-gold);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .bot-logo {
+            width: 120px;
+            height: auto;
+            border-radius: 20%;
+            border: 3px solid var(--accent-gold);
+            margin-bottom: 20px;
+            box-shadow: 0 0 20px rgba(246, 208, 0, 0.2);
+        }
+
+        h1 {
+            color: var(--nord6);
+            font-size: 2.5rem;
+            margin: 10px 0;
+            letter-spacing: 2px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .btn-invite {
+            background-color: var(--accent-gold);
+            color: var(--accent-blue);
+            padding: 14px 28px;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-block;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: transform 0.2s, background-color 0.2s;
+            margin-top: 20px;
+        }
+
+        .btn-invite:hover {
+            transform: translateY(-2px);
+            background-color: var(--nord6);
+        }
+
+        h2 {
+            border-left: 5px solid var(--accent-gold);
+            padding-left: 15px;
+            color: var(--nord8);
+            margin-top: 50px;
+        }
+
+        /* コマンドカードのグリッドレイアウト */
+        #command-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .command-card {
+            background-color: var(--nord1);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--nord3);
+            transition: border-color 0.3s;
+        }
+
+        .command-card:hover {
+            border-color: var(--accent-gold);
+        }
+
+        .command-card h3 {
+            margin-top: 0;
+            color: var(--accent-gold);
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        code {
+            background: rgba(0,0,0,0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px;
+            color: var(--nord3);
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <img src="1000037859.png" alt="Rb m/25E Logo" class="bot-logo">
+    <h1>Rb m/25E</h1>
+    <p>サーバーの境界を越える、汎用北欧風便利Bot</p>
+    <a href="https://discord.com/oauth2/authorize?client_id=1450423781167468655&permissions=8&integration_type=0&scope=bot+applications.commands" class="btn-invite">Botをサーバーに招待</a>
+</header>
+
+<div class="container">
+    <section>
+        <h2>利用可能なコマンド</h2>
+        <div id="command-list">
+            </div>
+    </section>
+</div>
+
+<footer>
+    &copy; 2026 Rb m/25E System Operations. Developed by sk0528jp.
+</footer>
+
+<script>
+    // --- コマンドの追加・編集はここで行います ---
+    const commands = [
+        {
+            name: "/user [target]",
+            desc: "対象の公開情報、アクティビティ、資産状況を精密調査します。"
+        },
+        {
+            name: "/contact [user_id] [message]",
+            desc: "指定したユーザーIDへ直接メッセージを送信します（匿名送信の選択が可能）。"
+        },
+        {
+            name: "/help",
+            desc: "このWebドキュメントへのリンクと、簡易ガイドを表示します。"
+        },
+        // 新しいコマンドを追加する場合はここにオブジェクトを足すだけ
+        // { name: "/new_cmd", desc: "説明文" }
+    ];
+
+    const listContainer = document.getElementById('command-list');
+
+    commands.forEach(cmd => {
+        const card = document.createElement('div');
+        card.className = 'command-card';
+        card.innerHTML = `
+            <h3><code>${cmd.name}</code></h3>
+            <p>${cmd.desc}</p>
+        `;
+        listContainer.appendChild(card);
+    });
+</script>
+
+</body>
+</html>
