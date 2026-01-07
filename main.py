@@ -62,7 +62,8 @@ class Rb_m25_Bot(commands.Bot):
             "cogs.fishing", 
             "cogs.contact",
             "cogs.translator",
-            "cogs.invite_search", # 招待追跡ユニット
+            "cogs.invite_search",
+            "cogs.moderation",
             "cogs.study"
         ]
         
