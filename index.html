@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rb m/25E | 汎用北欧風便利Bot</title>
+    <title>Rb m/25E</title>
     <style>
         :root {
             /* アイコン由来のアクセントカラー */
@@ -128,9 +128,9 @@
 <body>
 
 <header>
-    <img src="1000037859.png" alt="Rb m/25E Logo" class="bot-logo">
+    <img src="https://images-ext-1.discordapp.net/external/k9mdAk9fddL6Opp_1CiCHQOFFBT330KhOP6ZZpneTZw/%3Fsize%3D1024/https/cdn.discordapp.com/avatars/1450423781167468655/cff7c1a5a0cbaec33c2e362740062782.png?format=webp&quality=lossless&width=414&height=414" alt="Rb m/25E Logo" class="bot-logo">
     <h1>Rb m/25E</h1>
-    <p>サーバーの境界を越える、汎用北欧風便利Bot</p>
+    <p>サーバーの境界を越える、汎用便利Bot</p>
     <a href="https://discord.com/oauth2/authorize?client_id=1450423781167468655&permissions=8&integration_type=0&scope=bot+applications.commands" class="btn-invite">Botをサーバーに招待</a>
 </header>
 
@@ -150,12 +150,64 @@
     // --- コマンドの追加・編集はここで行います ---
     const commands = [
         {
-            name: "/user [target]",
-            desc: "対象の公開情報、アクティビティ、資産状況を精密調査します。"
+            name: "/user [target:id/mention] [mode:公開/非公開]",
+            desc: "対象の公開情報、アクティビティ、資産状況をユーザーID・メンションで調査します、modeでメッセージを公開にするか選択できます（デフォルトは非公開）、/userをそのまま実行で自分の情報を出力します。"
         },
         {
-            name: "/contact [user_id] [message]",
-            desc: "指定したユーザーIDへ直接メッセージを送信します（匿名送信の選択が可能）。"
+            name: "/ping",
+            desc: "Botとの遅延情報を出力します。"
+        },
+        {
+            name: "/ranking [credit/XP/fishing/study]",
+            desc: "botに記録されている各種データのランキングを出力します、現在は資産・貢献度・釣り（最大保有サイズ）・学習のランキング（累計学習時間）が出力できます。"
+        },
+        {
+            name: "/contact [destination:ユーザーID/メンション/bot開発者dev] [show_identity:True/False] [message] [※attachment]",
+            desc: "指定されたユーザーにbotからDMを送信します、show_identityで送信者の情報を公開[true]・非公開[false]にできます、messageに本文内容を入力してください、attachmentは任意でファイルなどを一つだけ添付できます。"
+        },
+        {
+            name: "/study_stats",
+            desc: "自分の学習統計を出力します。"
+        },
+        {
+            name: "/study_start",
+            desc: "学習時間の記録を開始します。"
+        },
+        {
+            name: "/study_end",
+            desc: "学習時間の記録を終了します。"
+        },
+        {
+            name: "/balance",
+            desc: "自分の資産情報を出力します。"
+        },
+        {
+            name: "/stats",
+            desc: "自分の情報を簡易的に出力します。"
+        },
+        {
+            name: "/server [guild_id:サーバーのID]",
+            desc: "/serverで現在のサーバーの情報を取得します、サーバーIDを追記することで、対象のサーバーにこのBotが所属していれば、そのサーバーの情報も取得できます。"
+        },
+        {
+            name: "/panel create [title] [description] [color]",
+            desc: "ロールパネルを作成します、titleにパネルのタイトル、descriptionにパネルについての説明、colorでパネルの埋め込みカラーを指定できます。"
+        },
+        {
+            name: "/panel add [message_id] [role] [label] [style]",
+            desc: "指定したメッセージIDのパネルに指定ロールを一つずつ追加できます、labelにはボタンに表示するテキスト（未入力でロール名）、styleでボタンのカラー（未入力で青）を指定できます。"
+        },
+        {
+            name: "/panel remove [message_id] [role]",
+            desc: "指定したメッセージIDのパネルから、指定のロールを削除します。"
+        },
+        {
+            name: "/fishing",
+            desc: "釣りをします、_inventoryで持っている魚の一覧、_saleで魚を売却できます。"
+        },
+        {
+            name: "/exchange",
+            desc: "XPをクレジットに換金します。"
         },
         {
             name: "/help",
