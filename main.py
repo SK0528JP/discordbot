@@ -65,6 +65,7 @@ class Rb_m25_Bot(commands.Bot):
             "cogs.invite_search",
             "cogs.moderation",
             "cogs.rolepanel",
+            "cogs.ryokuho",
             "cogs.study"
         ]
         
